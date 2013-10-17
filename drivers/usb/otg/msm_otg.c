@@ -1235,7 +1235,7 @@ static int msm_otg_usbdev_notify(struct notifier_block *self,
 	 */
 
 	// do not cause required code to be skipped -ziddey
-	// will not switch to a_host / charge otherwise
+	// will not switch to a_host or charge otherwise
 	/*if (!udev->parent || udev->parent->parent ||
 			motg->chg_type == USB_ACA_DOCK_CHARGER)
 		goto out;*/
@@ -3159,39 +3159,43 @@ static ssize_t msm_otg_mode_write(struct file *file, const char __user *ubuf,
 		goto out;
 	}
 
+	// always force req_mode, and use ID_A instead of ID for host mode -ziddey
 	switch (req_mode) {
 	case USB_NONE:
-		switch (phy->state) {
+		/*switch (phy->state) {
 		case OTG_STATE_A_HOST:
 		case OTG_STATE_B_PERIPHERAL:
-			set_bit(ID, &motg->inputs);
+			set_bit(ID, &motg->inputs);*/
+			clear_bit(ID_A, &motg->inputs);
 			clear_bit(B_SESS_VLD, &motg->inputs);
 			break;
-		default:
+		/*default:
 			goto out;
 		}
-		break;
+		break;*/
 	case USB_PERIPHERAL:
-		switch (phy->state) {
+		/*switch (phy->state) {
 		case OTG_STATE_B_IDLE:
 		case OTG_STATE_A_HOST:
-			set_bit(ID, &motg->inputs);
+			set_bit(ID, &motg->inputs);*/
+			clear_bit(ID_A, &motg->inputs);
 			set_bit(B_SESS_VLD, &motg->inputs);
 			break;
-		default:
+		/*default:
 			goto out;
 		}
-		break;
+		break;*/
 	case USB_HOST:
-		switch (phy->state) {
+		/*switch (phy->state) {
 		case OTG_STATE_B_IDLE:
 		case OTG_STATE_B_PERIPHERAL:
-			clear_bit(ID, &motg->inputs);
+			clear_bit(ID, &motg->inputs);*/
+			set_bit(ID_A, &motg->inputs);
 			break;
-		default:
+		/*default:
 			goto out;
 		}
-		break;
+		break;*/
 	default:
 		goto out;
 	}
@@ -3356,8 +3360,9 @@ static int msm_otg_debugfs_init(struct msm_otg *motg)
 	if (!msm_otg_dbg_root || IS_ERR(msm_otg_dbg_root))
 		return -ENODEV;
 
-	if (motg->pdata->mode == USB_OTG &&
-		motg->pdata->otg_control == OTG_USER_CONTROL) {
+	// enable /sys/kernel/debug/msm_otg/host -ziddey
+	if (motg->pdata->mode == USB_OTG /*&&
+		motg->pdata->otg_control == OTG_USER_CONTROL*/) {
 
 		msm_otg_dentry = debugfs_create_file("mode", S_IRUGO |
 			S_IWUSR, msm_otg_dbg_root, motg,
