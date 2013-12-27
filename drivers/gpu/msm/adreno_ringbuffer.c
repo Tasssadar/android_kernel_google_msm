@@ -368,60 +368,25 @@ static int _ringbuffer_bootstrap_ucode(struct adreno_ringbuffer *rb,
  */
 void _ringbuffer_setup_common(struct adreno_ringbuffer *rb)
 {
-	union reg_cp_rb_cntl cp_rb_cntl;
-	unsigned int rb_cntl;
 	struct kgsl_device *device = rb->device;
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-
-	kgsl_sharedmem_set(rb->device, &rb->memptrs_desc, 0, 0,
-			   sizeof(struct kgsl_rbmemptrs));
 
 	kgsl_sharedmem_set(rb->device, &rb->buffer_desc, 0, 0xAA,
 			   (rb->sizedwords << 2));
 
-	if (adreno_is_a2xx(adreno_dev)) {
-		kgsl_regwrite(device, REG_CP_RB_WPTR_BASE,
-			(rb->memptrs_desc.gpuaddr
-			+ GSL_RB_MEMPTRS_WPTRPOLL_OFFSET));
-
-		/* setup WPTR delay */
-		kgsl_regwrite(device, REG_CP_RB_WPTR_DELAY,
-			0 /*0x70000010 */);
-	}
-
-	/*setup REG_CP_RB_CNTL */
-	adreno_readreg(adreno_dev, ADRENO_REG_CP_RB_CNTL, &rb_cntl);
-	cp_rb_cntl.val = rb_cntl;
-
 	/*
 	 * The size of the ringbuffer in the hardware is the log2
-	 * representation of the size in quadwords (sizedwords / 2)
+	 * representation of the size in quadwords (sizedwords / 2).
+	 * Also disable the host RPTR shadow register as it might be unreliable
+	 * in certain circumstances.
 	 */
-	cp_rb_cntl.f.rb_bufsz = ilog2(rb->sizedwords >> 1);
 
-	/*
-	 * Specify the quadwords to read before updating mem RPTR.
-	 * Like above, pass the log2 representation of the blocksize
-	 * in quadwords.
-	*/
-	cp_rb_cntl.f.rb_blksz = ilog2(KGSL_RB_BLKSIZE >> 3);
-
-	if (adreno_is_a2xx(adreno_dev)) {
-		/* WPTR polling */
-		cp_rb_cntl.f.rb_poll_en = GSL_RB_CNTL_POLL_EN;
-	}
-
-	/* mem RPTR writebacks */
-	cp_rb_cntl.f.rb_no_update =  GSL_RB_CNTL_NO_UPDATE;
-
-	adreno_writereg(adreno_dev, ADRENO_REG_CP_RB_CNTL, cp_rb_cntl.val);
+	adreno_writereg(adreno_dev, ADRENO_REG_CP_RB_CNTL,
+		(ilog2(rb->sizedwords >> 1) & 0x3F) |
+		(1 << 27));
 
 	adreno_writereg(adreno_dev, ADRENO_REG_CP_RB_BASE,
 					rb->buffer_desc.gpuaddr);
-
-	adreno_writereg(adreno_dev, ADRENO_REG_CP_RB_RPTR_ADDR,
-				rb->memptrs_desc.gpuaddr +
-				GSL_RB_MEMPTRS_RPTR_OFFSET);
 
 	if (adreno_is_a2xx(adreno_dev)) {
 		/* explicitly clear all cp interrupts */
@@ -621,20 +586,6 @@ int adreno_ringbuffer_init(struct kgsl_device *device)
 		return status;
 	}
 
-	/* allocate memory for polling and timestamps */
-	/* This really can be at 4 byte alignment boundry but for using MMU
-	 * we need to make it at page boundary */
-	status = kgsl_allocate_contiguous(&rb->memptrs_desc,
-		sizeof(struct kgsl_rbmemptrs));
-
-	if (status != 0) {
-		adreno_ringbuffer_close(rb);
-		return status;
-	}
-
-	/* overlay structure on memptrs memory */
-	rb->memptrs = (struct kgsl_rbmemptrs *) rb->memptrs_desc.hostptr;
-
 	rb->global_ts = 0;
 
 	return 0;
@@ -645,7 +596,6 @@ void adreno_ringbuffer_close(struct adreno_ringbuffer *rb)
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(rb->device);
 
 	kgsl_sharedmem_free(&rb->buffer_desc);
-	kgsl_sharedmem_free(&rb->memptrs_desc);
 
 	kfree(adreno_dev->pfp_fw);
 	kfree(adreno_dev->pm4_fw);
@@ -669,6 +619,7 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 	unsigned int rcmd_gpu;
 	unsigned int context_id;
 	unsigned int gpuaddr = rb->device->memstore.gpuaddr;
+	bool profile_ready;
 
 	if (drawctxt != NULL && kgsl_context_detached(&drawctxt->base))
 		return -EINVAL;
@@ -692,6 +643,18 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 	if (drawctxt)
 		drawctxt->internal_timestamp = rb->global_ts;
 
+	/*
+	 * If in stream ib profiling is enabled and there are counters
+	 * assigned, then space needs to be reserved for profiling.  This
+	 * space in the ringbuffer is always consumed (might be filled with
+	 * NOPs in error case.  profile_ready needs to be consistent through
+	 * the _addcmds call since it is allocating additional ringbuffer
+	 * command space.
+	 */
+	profile_ready = !adreno_is_a2xx(adreno_dev) && drawctxt &&
+		adreno_profile_assignments_ready(&adreno_dev->profile) &&
+		!(flags & KGSL_CMD_FLAGS_INTERNAL_ISSUE);
+
 	/* reserve space to temporarily turn off protected mode
 	*  error checking if needed
 	*/
@@ -704,13 +667,8 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 	/* Add two dwords for the CP_INTERRUPT */
 	total_sizedwords += drawctxt ? 2 : 0;
 
-	/* context rollover */
 	if (adreno_is_a3xx(adreno_dev))
-		total_sizedwords += 3;
-
-	/* For HLSQ updates below */
-	if (adreno_is_a4xx(adreno_dev) || adreno_is_a3xx(adreno_dev))
-		total_sizedwords += 4;
+		total_sizedwords += 7;
 
 	if (adreno_is_a2xx(adreno_dev))
 		total_sizedwords += 2; /* CP_WAIT_FOR_IDLE */
@@ -731,6 +689,9 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 
 	if (flags & KGSL_CMD_FLAGS_WFI)
 		total_sizedwords += 2; /* WFI */
+
+	if (profile_ready)
+		total_sizedwords += 6;   /* space for pre_ib and post_ib */
 
 	/* Add space for the power on shader fixup if we need it */
 	if (flags & KGSL_CMD_FLAGS_PWRON_FIXUP)
@@ -766,6 +727,11 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 		GSL_RB_WRITE(rb->device, ringcmds, rcmd_gpu,
 			adreno_dev->pwron_fixup_dwords);
 	}
+
+	/* Add any IB required for profiling if it is enabled */
+	if (profile_ready)
+		adreno_profile_preib_processing(rb->device, drawctxt->base.id,
+				&flags, &ringcmds, &rcmd_gpu);
 
 	/* start-of-pipeline timestamp */
 	GSL_RB_WRITE(rb->device, ringcmds, rcmd_gpu,
@@ -803,7 +769,7 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 		GSL_RB_WRITE(rb->device, ringcmds, rcmd_gpu, 0x00);
 	}
 
-	if (adreno_is_a3xx(adreno_dev) || adreno_is_a4xx(adreno_dev)) {
+	if (adreno_is_a3xx(adreno_dev)) {
 		/*
 		 * Flush HLSQ lazy updates to make sure there are no
 		 * resources pending for indirect loads after the timestamp
@@ -817,6 +783,12 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 			cp_type3_packet(CP_WAIT_FOR_IDLE, 1));
 		GSL_RB_WRITE(rb->device, ringcmds, rcmd_gpu, 0x00);
 	}
+
+	/* Add any postIB required for profiling if it is enabled and has
+	   assigned counters */
+	if (profile_ready)
+		adreno_profile_postib_processing(rb->device, &flags,
+						 &ringcmds, &rcmd_gpu);
 
 	/*
 	 * end-of-pipeline timestamp.  If per context timestamps is not
@@ -1131,35 +1103,23 @@ adreno_ringbuffer_issueibcmds(struct kgsl_device_private *dev_priv,
 			return -EINVAL;
 	}
 
-	/* For now everybody has the same priority */
-	cmdbatch->priority = ADRENO_CONTEXT_DEFAULT_PRIORITY;
-
 	/* wait for the suspend gate */
 	wait_for_completion(&device->cmdbatch_gate);
+
+	/*
+	 * Clear the wake on touch bit to indicate an IB has been submitted
+	 * since the last time we set it
+	 */
+
+	device->flags &= ~KGSL_FLAG_WAKE_ON_TOUCH;
 
 	/* Queue the command in the ringbuffer */
 	ret = adreno_dispatcher_queue_cmd(adreno_dev, drawctxt, cmdbatch,
 		timestamp);
 
 	if (ret)
-		KGSL_DRV_ERR(device, "adreno_context_queue_cmd returned %d\n",
-				ret);
-	else {
-		/*
-		 * only call trace_gpu_job_enqueue for actual commands - dummy
-		 * sync command batches won't get scheduled on the GPU
-		 */
-
-		if (!(cmdbatch->flags & KGSL_CONTEXT_SYNC)) {
-			const char *str = "3D";
-			if (drawctxt->type == KGSL_CONTEXT_TYPE_CL ||
-				drawctxt->type == KGSL_CONTEXT_TYPE_RS)
-				str = "compute";
-
-			kgsl_trace_gpu_job_enqueue(drawctxt->base.id,
-				cmdbatch->timestamp, str);
-		}
-	}
+		KGSL_DRV_ERR(device,
+			"adreno_dispatcher_queue_cmd returned %d\n", ret);
 
 	/*
 	 * Return -EPROTO if the device has faulted since the last time we
@@ -1192,6 +1152,9 @@ int adreno_ringbuffer_submitcmd(struct adreno_device *adreno_dev,
 
 	ibdesc = cmdbatch->ibdesc;
 	numibs = cmdbatch->ibcount;
+
+	/* process any profiling results that are available into the log_buf */
+	adreno_profile_process_results(device);
 
 	/*When preamble is enabled, the preamble buffer with state restoration
 	commands are stored in the first node of the IB chain. We can skip that

@@ -96,7 +96,7 @@ static void devfreq_set_freq_limits(struct devfreq *devfreq)
  * @devfreq:	the devfreq instance
  * @freq:	the target frequency
  */
-static int devfreq_get_freq_level(struct devfreq *devfreq, unsigned long freq)
+int devfreq_get_freq_level(struct devfreq *devfreq, unsigned long freq)
 {
 	int lev;
 
@@ -106,6 +106,7 @@ static int devfreq_get_freq_level(struct devfreq *devfreq, unsigned long freq)
 
 	return -EINVAL;
 }
+EXPORT_SYMBOL(devfreq_get_freq_level);
 
 /**
  * devfreq_update_status() - Update statistics of devfreq behavior
@@ -186,7 +187,7 @@ int update_devfreq(struct devfreq *devfreq)
 		return -EINVAL;
 
 	/* Reevaluate the proper frequency */
-	err = devfreq->governor->get_target_freq(devfreq, &freq);
+	err = devfreq->governor->get_target_freq(devfreq, &freq, &flags);
 	if (err)
 		return err;
 
@@ -442,6 +443,32 @@ static void devfreq_dev_release(struct device *dev)
 }
 
 /**
+ * find_governor_data - Find device specific private data for a governor.
+ * @profile: The profile to search.
+ * @governor_name: The governor to search for.
+ *
+ * Look up the device specific data for a governor.
+ */
+static void *find_governor_data(struct devfreq_dev_profile *profile,
+				const char *governor_name)
+{
+	void *data = NULL;
+	int i;
+
+	if (profile->governor_data == NULL)
+		return NULL;
+
+	for (i = 0; i < profile->num_governor_data; i++) {
+		if (strncmp(governor_name, profile->governor_data[i].name,
+			     DEVFREQ_NAME_LEN) == 0) {
+			data = profile->governor_data[i].data;
+			break;
+		}
+	}
+	return data;
+}
+
+/**
  * devfreq_add_device() - Add devfreq feature to the device
  * @dev:	the device to add devfreq feature.
  * @profile:	device-specific profile to run devfreq.
@@ -488,7 +515,10 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	devfreq->profile = profile;
 	strncpy(devfreq->governor_name, governor_name, DEVFREQ_NAME_LEN);
 	devfreq->previous_freq = profile->initial_freq;
-	devfreq->data = data;
+
+	devfreq->data = data ? data : find_governor_data(devfreq->profile,
+							 governor_name);
+
 	devfreq->nb.notifier_call = devfreq_notifier_call;
 
 	devfreq->trans_table =	devm_kzalloc(dev, sizeof(unsigned int) *
@@ -746,6 +776,7 @@ static ssize_t store_governor(struct device *dev, struct device_attribute *attr,
 			goto out;
 		}
 	}
+	df->data = find_governor_data(df->profile, str_governor);
 	df->governor = governor;
 	strncpy(df->governor_name, governor->name, DEVFREQ_NAME_LEN);
 	ret = df->governor->event_handler(df, DEVFREQ_GOV_START, NULL);

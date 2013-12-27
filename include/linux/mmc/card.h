@@ -218,6 +218,7 @@ enum mmc_blk_status {
 	MMC_BLK_NEW_REQUEST,
 	MMC_BLK_URGENT,
 	MMC_BLK_URGENT_DONE,
+	MMC_BLK_NO_REQ_TO_STOP,
 };
 
 struct mmc_wr_pack_stats {
@@ -514,7 +515,9 @@ static inline void __maybe_unused remove_quirk(struct mmc_card *card, int data)
 #define mmc_card_set_present(c)	((c)->state |= MMC_STATE_PRESENT)
 #define mmc_card_set_readonly(c) ((c)->state |= MMC_STATE_READONLY)
 #define mmc_card_set_highspeed(c) ((c)->state |= MMC_STATE_HIGHSPEED)
+#define mmc_card_clr_highspeed(c) ((c)->state &= ~MMC_STATE_HIGHSPEED)
 #define mmc_card_set_hs200(c)	((c)->state |= MMC_STATE_HIGHSPEED_200)
+#define mmc_card_clr_hs200(c)	((c)->state &= ~MMC_STATE_HIGHSPEED_200)
 #define mmc_card_set_blockaddr(c) ((c)->state |= MMC_STATE_BLOCKADDR)
 #define mmc_card_set_ddr_mode(c) ((c)->state |= MMC_STATE_HIGHSPEED_DDR)
 #define mmc_card_set_uhs(c) ((c)->state |= MMC_STATE_ULTRAHIGHSPEED)
