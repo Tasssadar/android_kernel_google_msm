@@ -97,6 +97,8 @@ Required properties
 				interface blocks avaialble in hardware.
 
 Optional properties:
+- vdd-cx-supply :	Phandle for vdd CX regulator device node.
+- batfet-supply :	Phandle for battery FET regulator device node.
 - qcom,vbif-settings :	Array with key-value pairs of constant VBIF register
 			settings used to setup MDSS QoS for optimum performance.
 			The key used should be offset from "vbif_phys" register
@@ -130,6 +132,11 @@ Optional properties:
 				restricted for a source surface pipe. If this
 				property is not specified, no such restriction
 				would be applied.
+- qcom,mdss-pipe-rgb-fixed-mmb: Array of indexes describing fixed Memory Macro
+				Blocks (MMBs) for rgb pipes. First value denotes
+				total numbers of MMBs per pipe while values, if
+				any, following first one denotes indexes of MMBs
+				to that RGB pipe.
 
 Optional subnodes:
 Child nodes representing the frame buffer virtual devices.
@@ -154,6 +161,11 @@ Subnode properties:
 			 enabled if framebuffer size is less than max mixer
 			 width; 2) the defaut even split is enabled if frambuffer
 			 size is greater than max mixer width.
+- qcom,memblock-reserve: Specifies the memory location and the size reserved
+			 for the framebuffer used to display the splash screen.
+			 This property is required whenever the continuous splash
+			 screen feature is enabled for the corresponding
+			 framebuffer device.
 
 Example:
 	qcom,mdss_mdp@fd900000 {
@@ -163,6 +175,8 @@ Example:
 		reg-names = "mdp_phys", "vbif_phys";
 		interrupts = <0 72 0>;
 		vdd-supply = <&gdsc_mdss>;
+		vdd-cx-supply = <&pm8841_s2_corner>;
+		batfet-supply = <&pm8941_chg_batif>;
 		qcom,max-clk-rate = <320000000>;
 		qcom,vbif-settings = <0x0004 0x00000001>,
 				     <0x00D8 0x00000707>;
@@ -176,6 +190,10 @@ Example:
 		qcom,mdss-pipe-vig-fetch-id = <1 4 7>;
 		qcom,mdss-pipe-rgb-fetch-id = <16 17 18>;
 		qcom,mdss-pipe-dma-fetch-id = <10 13>;
+		qcom,mdss-pipe-rgb-fixed-mmb =	<2 0 1>,
+						<2 2 3>,
+						<2 4 5>,
+						<2 6 7>;
 		qcom,mdss-smp-data = <22 4096>;
 		qcom,mdss-rot-block-size = <64>;
 		qcom,mdss-smp-mb-per-pipe = <2>;

@@ -390,10 +390,6 @@ static struct pll_freq_tbl apcs_pll_freq[] = {
 	PLL_F_END
 };
 
-/*
- * Need to skip handoff of the acpu pll to avoid handoff code
- * to turn off the pll when the acpu is running off this pll.
- */
 static struct pll_clk apcspll_clk_src = {
 	.mode_reg = (void __iomem *)APCS_CPU_PLL_MODE_REG,
 	.l_reg = (void __iomem *)APCS_CPU_PLL_L_REG,
@@ -415,7 +411,6 @@ static struct pll_clk apcspll_clk_src = {
 		.dbg_name = "apcspll_clk_src",
 		.ops = &clk_ops_local_pll,
 		CLK_INIT(apcspll_clk_src.c),
-		.flags = CLKFLAG_SKIP_HANDOFF,
 	},
 };
 
@@ -431,8 +426,9 @@ static DEFINE_CLK_VOTER(bimc_msmbus_a_clk, &bimc_a_clk.c, LONG_MAX);
 
 static DEFINE_CLK_VOTER(pnoc_sdcc2_clk, &pnoc_clk.c, LONG_MAX);
 static DEFINE_CLK_VOTER(pnoc_sdcc3_clk, &pnoc_clk.c, LONG_MAX);
-
 static DEFINE_CLK_VOTER(pnoc_sps_clk, &pnoc_clk.c, LONG_MAX);
+
+static DEFINE_CLK_BRANCH_VOTER(cxo_lpm_clk, &cxo_clk_src.c);
 
 static struct clk_freq_tbl ftbl_gcc_ipa_clk[] = {
 	F( 50000000,    gpll0,   12,   0,   0),
@@ -1803,6 +1799,7 @@ static struct measure_clk measure_clk = {
 
 static struct clk_lookup msm_clocks_9625[] = {
 	CLK_LOOKUP("xo",	cxo_clk_src.c,	""),
+	CLK_LOOKUP("xo",        cxo_lpm_clk.c, "fc4281d0.qcom,mpm"),
 	CLK_LOOKUP("measure",	measure_clk.c,	"debug"),
 
 	CLK_LOOKUP("pll0", gpll0_activeonly_clk_src.c, "f9010008.qcom,acpuclk"),

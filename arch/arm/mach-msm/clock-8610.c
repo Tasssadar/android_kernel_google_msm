@@ -24,6 +24,7 @@
 #include <mach/rpm-regulator-smd.h>
 #include <mach/socinfo.h>
 #include <mach/rpm-smd.h>
+#include <mach/clock-generic.h>
 
 #include "clock-local2.h"
 #include "clock-pll.h"
@@ -510,6 +511,15 @@ static DEFINE_CLK_VOTER(bimc_acpu_a_clk, &bimc_a_clk.c, LONG_MAX);
 static DEFINE_CLK_VOTER(pnoc_sps_clk, &pnoc_clk.c, LONG_MAX);
 static DEFINE_CLK_VOTER(pnoc_iommu_clk, &pnoc_clk.c, LONG_MAX);
 
+static DEFINE_CLK_BRANCH_VOTER(cxo_otg_clk, &gcc_xo_clk_src.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_lpass_pil_clk, &gcc_xo_clk_src.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_lpm_clk, &gcc_xo_clk_src.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_pil_pronto_clk, &gcc_xo_clk_src.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_mss_pil_clk, &gcc_xo_clk_src.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_pil_mba_clk, &gcc_xo_clk_src.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_wlan_clk, &gcc_xo_clk_src.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_acpu_clk, &gcc_xo_clk_src.c);
+
 static DEFINE_CLK_MEASURE(apc0_m_clk);
 static DEFINE_CLK_MEASURE(apc1_m_clk);
 static DEFINE_CLK_MEASURE(apc2_m_clk);
@@ -577,11 +587,6 @@ static struct pll_clk a7sspll = {
 		},
 		.num_fmax = VDD_SR2_PLL_NUM,
 		CLK_INIT(a7sspll.c),
-		/*
-		 * Need to skip handoff of the acpu pll to avoid
-		 * turning off the pll when the cpu is using it
-		 */
-		.flags = CLKFLAG_SKIP_HANDOFF,
 	},
 };
 
@@ -1277,6 +1282,7 @@ static struct local_vote_clk gcc_ce1_clk = {
 	.en_mask = BIT(5),
 	.base = &virt_bases[GCC_BASE],
 	.c = {
+		.parent = &ce1_clk_src.c,
 		.dbg_name = "gcc_ce1_clk",
 		.ops = &clk_ops_vote,
 		CLK_INIT(gcc_ce1_clk.c),
@@ -2020,111 +2026,111 @@ static struct branch_clk csi1rdi_clk = {
 	},
 };
 
-static struct cam_mux_clk csi0phy_cam_mux_clk = {
-	.enable_reg = MMSS_CAMSS_MISC,
-	.enable_mask = BIT(11),
-	.select_reg = MMSS_CAMSS_MISC,
-	.select_mask = BIT(9),
-	.sources = (struct mux_source[]) {
-		{ &csi0phy_clk.c,     0 },
-		{ &csi1phy_clk.c, BIT(9) },
-		{ 0 },
-	},
+static struct mux_clk csi0phy_cam_mux_clk = {
+	.ops = &mux_reg_ops,
+	.en_mask = BIT(11),
+	.mask = 0x1,
+	.shift = 9,
+	.offset = MMSS_CAMSS_MISC,
+	MUX_SRC_LIST(
+		{ &csi0phy_clk.c, 0 },
+		{ &csi1phy_clk.c, 1 },
+	),
 	.base = &virt_bases[MMSS_BASE],
 	.c = {
 		.dbg_name = "csi0phy_cam_mux_clk",
-		.ops = &clk_ops_cam_mux,
+		.ops = &clk_ops_gen_mux,
 		CLK_INIT(csi0phy_cam_mux_clk.c),
 	},
 };
 
-static struct cam_mux_clk csi1phy_cam_mux_clk = {
-	.enable_reg = MMSS_CAMSS_MISC,
-	.enable_mask = BIT(10),
-	.select_reg = MMSS_CAMSS_MISC,
-	.select_mask = BIT(8),
-	.sources = (struct mux_source[]) {
-		{ &csi0phy_clk.c,     0 },
-		{ &csi1phy_clk.c, BIT(8) },
-		{ 0 },
-	},
+static struct mux_clk csi1phy_cam_mux_clk = {
+	.ops = &mux_reg_ops,
+	.en_mask = BIT(10),
+	.mask = 0x1,
+	.shift = 8,
+	.offset = MMSS_CAMSS_MISC,
+	MUX_SRC_LIST(
+		{ &csi0phy_clk.c, 0 },
+		{ &csi1phy_clk.c, 1 },
+	),
 	.base = &virt_bases[MMSS_BASE],
 	.c = {
 		.dbg_name = "csi1phy_cam_mux_clk",
-		.ops = &clk_ops_cam_mux,
+		.ops = &clk_ops_gen_mux,
 		CLK_INIT(csi1phy_cam_mux_clk.c),
 	},
 };
 
-static struct cam_mux_clk csi0pix_cam_mux_clk = {
-	.enable_reg = MMSS_CAMSS_MISC,
-	.enable_mask = BIT(7),
-	.select_reg = MMSS_CAMSS_MISC,
-	.select_mask = BIT(3),
-	.sources = (struct mux_source[]) {
-		{ &csi0pix_clk.c,      0 },
-		{ &csi1pix_clk.c, BIT(3) },
-		{ 0 },
-	},
+static struct mux_clk csi0pix_cam_mux_clk = {
+	.ops = &mux_reg_ops,
+	.en_mask = BIT(7),
+	.mask = 0x1,
+	.shift = 3,
+	.offset = MMSS_CAMSS_MISC,
+	MUX_SRC_LIST(
+		{ &csi0pix_clk.c, 0 },
+		{ &csi1pix_clk.c, 1 },
+	),
 	.base = &virt_bases[MMSS_BASE],
 	.c = {
 		.dbg_name = "csi0pix_cam_mux_clk",
-		.ops = &clk_ops_cam_mux,
+		.ops = &clk_ops_gen_mux,
 		CLK_INIT(csi0pix_cam_mux_clk.c),
 	},
 };
 
 
-static struct cam_mux_clk rdi2_cam_mux_clk = {
-	.enable_reg = MMSS_CAMSS_MISC,
-	.enable_mask = BIT(6),
-	.select_reg = MMSS_CAMSS_MISC,
-	.select_mask = BIT(2),
-	.sources = (struct mux_source[]) {
-		{ &csi0rdi_clk.c,      0 },
-		{ &csi1rdi_clk.c, BIT(2) },
-		{ 0 },
-	},
+static struct mux_clk rdi2_cam_mux_clk = {
+	.ops = &mux_reg_ops,
+	.en_mask = BIT(6),
+	.mask = 0x1,
+	.shift = 2,
+	.offset = MMSS_CAMSS_MISC,
+	MUX_SRC_LIST(
+		{ &csi0rdi_clk.c, 0 },
+		{ &csi1rdi_clk.c, 1 },
+	),
 	.base = &virt_bases[MMSS_BASE],
 	.c = {
 		.dbg_name = "rdi2_cam_mux_clk",
-		.ops = &clk_ops_cam_mux,
+		.ops = &clk_ops_gen_mux,
 		CLK_INIT(rdi2_cam_mux_clk.c),
 	},
 };
 
-static struct cam_mux_clk rdi1_cam_mux_clk = {
-	.enable_reg = MMSS_CAMSS_MISC,
-	.enable_mask = BIT(5),
-	.select_reg = MMSS_CAMSS_MISC,
-	.select_mask = BIT(1),
-	.sources = (struct mux_source[]) {
-		{ &csi0rdi_clk.c,      0 },
-		{ &csi1rdi_clk.c, BIT(1) },
-		{ 0 },
-	},
+static struct mux_clk rdi1_cam_mux_clk = {
+	.ops = &mux_reg_ops,
+	.en_mask = BIT(5),
+	.mask = 0x1,
+	.shift = 1,
+	.offset = MMSS_CAMSS_MISC,
+	MUX_SRC_LIST(
+		{ &csi0rdi_clk.c, 0 },
+		{ &csi1rdi_clk.c, 1 },
+	),
 	.base = &virt_bases[MMSS_BASE],
 	.c = {
 		.dbg_name = "rdi1_cam_mux_clk",
-		.ops = &clk_ops_cam_mux,
+		.ops = &clk_ops_gen_mux,
 		CLK_INIT(rdi1_cam_mux_clk.c),
 	},
 };
 
-static struct cam_mux_clk rdi0_cam_mux_clk = {
-	.enable_reg = MMSS_CAMSS_MISC,
-	.enable_mask = BIT(4),
-	.select_reg = MMSS_CAMSS_MISC,
-	.select_mask = BIT(0),
-	.sources = (struct mux_source[]) {
-		{ &csi0rdi_clk.c,      0 },
-		{ &csi1rdi_clk.c, BIT(0) },
-		{ 0 },
-	},
+static struct mux_clk rdi0_cam_mux_clk = {
+	.ops = &mux_reg_ops,
+	.en_mask = BIT(4),
+	.mask = 0x1,
+	.shift = 0,
+	.offset = MMSS_CAMSS_MISC,
+	MUX_SRC_LIST(
+		{ &csi0rdi_clk.c, 0 },
+		{ &csi1rdi_clk.c, 1 },
+	),
 	.base = &virt_bases[MMSS_BASE],
 	.c = {
 		.dbg_name = "rdi0_cam_mux_clk",
-		.ops = &clk_ops_cam_mux,
+		.ops = &clk_ops_gen_mux,
 		CLK_INIT(rdi0_cam_mux_clk.c),
 	},
 };
@@ -2496,7 +2502,7 @@ static struct measure_mux_entry measure_mux[] = {
 	{            &gcc_ce1_axi_clk.c, GCC_BASE, 0x0139},
 	{            &gcc_ce1_ahb_clk.c, GCC_BASE, 0x013a},
 	{             &gcc_xo_clk_src.c, GCC_BASE, 0x0149},
-	{                   &bimc_clk.c, GCC_BASE, 0x015d},
+	{                   &bimc_clk.c, GCC_BASE, 0x0155},
 	{          &gcc_bimc_smmu_clk.c, GCC_BASE, 0x015e},
 	{       &gcc_lpass_q6_axi_clk.c, GCC_BASE, 0x0160},
 
@@ -2745,17 +2751,18 @@ static struct measure_clk measure_clk = {
 };
 
 static struct clk_lookup msm_clocks_8610[] = {
-	CLK_LOOKUP("xo",	gcc_xo_clk_src.c, "msm_otg"),
-	CLK_LOOKUP("xo",	gcc_xo_clk_src.c, "fe200000.qcom,lpass"),
+	CLK_LOOKUP("xo",	cxo_otg_clk.c, "msm_otg"),
+	CLK_LOOKUP("xo",	cxo_lpass_pil_clk.c, "fe200000.qcom,lpass"),
+	CLK_LOOKUP("xo",        cxo_lpm_clk.c, "fc4281d0.qcom,mpm"),
 
-	CLK_LOOKUP("xo",		gcc_xo_clk_src.c, "fc880000.qcom,mss"),
+	CLK_LOOKUP("xo",	       cxo_mss_pil_clk.c, "fc880000.qcom,mss"),
 	CLK_LOOKUP("bus_clk",  gcc_mss_q6_bimc_axi_clk.c, "fc880000.qcom,mss"),
 	CLK_LOOKUP("iface_clk",    gcc_mss_cfg_ahb_clk.c, "fc880000.qcom,mss"),
 	CLK_LOOKUP("mem_clk",     gcc_boot_rom_ahb_clk.c, "fc880000.qcom,mss"),
 
-	CLK_LOOKUP("xo",	gcc_xo_clk_src.c, "pil-mba"),
-	CLK_LOOKUP("xo",	gcc_xo_clk_src.c, "fb000000.qcom,wcnss-wlan"),
-	CLK_LOOKUP("xo",	gcc_xo_clk_src.c, "fb21b000.qcom,pronto"),
+	CLK_LOOKUP("xo",       cxo_pil_mba_clk.c, "pil-mba"),
+	CLK_LOOKUP("xo",	  cxo_wlan_clk.c, "fb000000.qcom,wcnss-wlan"),
+	CLK_LOOKUP("xo",    cxo_pil_pronto_clk.c, "fb21b000.qcom,pronto"),
 	CLK_LOOKUP("measure",	measure_clk.c,	"debug"),
 
 	CLK_LOOKUP("iface_clk",  gcc_blsp1_ahb_clk.c, "f991f000.serial"),
@@ -2879,6 +2886,7 @@ static struct clk_lookup msm_clocks_8610[] = {
 	CLK_LOOKUP("iface_clk",           gcc_blsp1_ahb_clk.c, "f9923000.i2c"),
 	CLK_LOOKUP("iface_clk",           gcc_blsp1_ahb_clk.c, "f9925000.i2c"),
 	CLK_LOOKUP("iface_clk",           gcc_blsp1_ahb_clk.c, "f9927000.i2c"),
+	CLK_LOOKUP("iface_clk",           gcc_blsp1_ahb_clk.c, "f9926000.spi"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup1_i2c_apps_clk.c, "f9923000.i2c"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup1_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup2_i2c_apps_clk.c, ""),
@@ -2886,6 +2894,7 @@ static struct clk_lookup msm_clocks_8610[] = {
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup3_i2c_apps_clk.c, "f9925000.i2c"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup3_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup4_i2c_apps_clk.c, ""),
+	CLK_LOOKUP("core_clk",  gcc_blsp1_qup4_spi_apps_clk.c, "f9926000.spi"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup4_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup5_i2c_apps_clk.c, "f9927000.i2c"),
 	CLK_LOOKUP("core_clk",  gcc_blsp1_qup5_spi_apps_clk.c, ""),
@@ -3013,10 +3022,12 @@ static struct clk_lookup msm_clocks_8610[] = {
 		"fda00c00.qcom,csiphy"),
 	CLK_LOOKUP("csiphy_timer_clk", csi0phytimer_clk.c,
 		"fda00c00.qcom,csiphy"),
+	CLK_LOOKUP("csi_ahb_clk", csi_ahb_clk.c, "fda00c00.qcom,csiphy"),
 	CLK_LOOKUP("csiphy_timer_src_clk", csi1phytimer_clk_src.c,
 		"fda01000.qcom,csiphy"),
 	CLK_LOOKUP("csiphy_timer_clk", csi1phytimer_clk.c,
 		"fda01000.qcom,csiphy"),
+	CLK_LOOKUP("csi_ahb_clk", csi_ahb_clk.c,  "fda01000.qcom,csiphy"),
 
 	/* CSID clocks */
 	CLK_LOOKUP("csi_clk", csi0_clk.c, "fda00000.qcom,csid"),
@@ -3073,7 +3084,7 @@ static struct clk_lookup msm_clocks_8610[] = {
 	CLK_LOOKUP("iface_clk", q6ss_ahb_lfabif_clk.c, "fe200000.qcom,lpass"),
 	CLK_LOOKUP("reg_clk",        q6ss_ahbm_clk.c,  "fe200000.qcom,lpass"),
 
-	CLK_LOOKUP("xo",      gcc_xo_a_clk_src.c, "f9011050.qcom,acpuclk"),
+	CLK_LOOKUP("xo",        cxo_acpu_clk.c, "f9011050.qcom,acpuclk"),
 	CLK_LOOKUP("gpll0", gpll0_ao_clk_src.c, "f9011050.qcom,acpuclk"),
 	CLK_LOOKUP("a7sspll",        a7sspll.c, "f9011050.qcom,acpuclk"),
 
@@ -3083,7 +3094,7 @@ static struct clk_lookup msm_clocks_8610[] = {
 	CLK_LOOKUP("measure_clk", apc3_m_clk, ""),
 	CLK_LOOKUP("measure_clk",   l2_m_clk, ""),
 
-	CLK_LOOKUP("xo",   gcc_xo_clk_src.c, "fb000000.qcom,wcnss-wlan"),
+	CLK_LOOKUP("xo",     cxo_wlan_clk.c, "fb000000.qcom,wcnss-wlan"),
 	CLK_LOOKUP("rf_clk",       cxo_a1.c, "fb000000.qcom,wcnss-wlan"),
 
 	CLK_LOOKUP("iface_clk", mdp_ahb_clk.c, "fd900000.qcom,mdss_mdp"),

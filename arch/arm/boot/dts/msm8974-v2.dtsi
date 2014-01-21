@@ -72,6 +72,7 @@
 	qcom,mdss-has-bwc;
 	qcom,mdss-has-decimation;
 	qcom,mdss-ad-off = <0x0013100 0x00013300>;
+	vdd-cx-supply = <&pm8841_s2_corner>;
 };
 
 &mdss_hdmi_tx {
@@ -121,12 +122,12 @@
 		<49880000 1496000>;
 	qcom,dec-ddr-ab-ib = <0 0>,
 		<208000 303000>,
-		<536000 303000>,
-		<1012000 303000>,
-		<2024000 606000>,
-		<3240000 970000>,
-		<4048000 1212000>,
-		<4264000 1279000>;
+		<536000 1600000>,
+		<1012000 1600000>,
+		<2024000 1600000>,
+		<3240000 1600000>,
+		<4048000 1600000>,
+		<4264000 1600000>;
 	qcom,iommu-groups = <&venus_domain_ns &venus_domain_sec_bitstream
 			&venus_domain_sec_pixel &venus_domain_sec_non_pixel>;
 	qcom,iommu-group-buffer-types = <0xfff 0x91 0x42 0x120>;
@@ -141,4 +142,43 @@
 
 &tspp {
 	vdd_cx-supply = <&pm8841_s2_corner>;
+};
+
+&krait_regulator_pmic {
+	status = "ok";
+
+	qcom,ctl@2000 {
+		status = "ok";
+	};
+
+	qcom,ps@2100 {
+		status = "ok";
+	};
+
+	qcom,freq@2200 {
+		status = "ok";
+	};
+};
+
+&cci {
+
+	qcom,camera@6e {
+		qcom,vdd-cx-supply = <&pm8841_s2>;
+		qcom,vdd-cx-name = "qcom,vdd-cx";
+	};
+
+	qcom,camera@20 {
+		qcom,vdd-cx-supply = <&pm8841_s2>;
+		qcom,vdd-cx-name = "qcom,vdd-cx";
+	};
+
+	qcom,camera@6c {
+		qcom,vdd-cx-supply = <&pm8841_s2>;
+		qcom,vdd-cx-name = "qcom,vdd-cx";
+	};
+
+	qcom,camera@90 {
+		qcom,vdd-cx-supply = <&pm8841_s2>;
+		qcom,vdd-cx-name = "qcom,vdd-cx";
+	};
 };

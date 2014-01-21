@@ -16,7 +16,10 @@
 #include <linux/iopoll.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
+#include <linux/bootmem.h>
+#include <linux/memblock.h>
 
+#include "mdss_fb.h"
 #include "mdss_mdp.h"
 #include "mdss_panel.h"
 
@@ -59,6 +62,7 @@ struct mdss_mdp_video_ctx {
 
 	atomic_t vsync_ref;
 	spinlock_t vsync_lock;
+	struct mutex vsync_mtx;
 	struct list_head vsync_handlers;
 };
 
@@ -211,19 +215,23 @@ static inline void video_vsync_irq_enable(struct mdss_mdp_ctl *ctl, bool clear)
 {
 	struct mdss_mdp_video_ctx *ctx = ctl->priv_data;
 
+	mutex_lock(&ctx->vsync_mtx);
 	if (atomic_inc_return(&ctx->vsync_ref) == 1)
 		mdss_mdp_irq_enable(MDSS_MDP_IRQ_INTF_VSYNC, ctl->intf_num);
 	else if (clear)
 		mdss_mdp_irq_clear(ctl->mdata, MDSS_MDP_IRQ_INTF_VSYNC,
 				ctl->intf_num);
+	mutex_unlock(&ctx->vsync_mtx);
 }
 
 static inline void video_vsync_irq_disable(struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_mdp_video_ctx *ctx = ctl->priv_data;
 
+	mutex_lock(&ctx->vsync_mtx);
 	if (atomic_dec_return(&ctx->vsync_ref) == 0)
 		mdss_mdp_irq_disable(MDSS_MDP_IRQ_INTF_VSYNC, ctl->intf_num);
+	mutex_unlock(&ctx->vsync_mtx);
 }
 
 static int mdss_mdp_video_add_vsync_handler(struct mdss_mdp_ctl *ctl,
@@ -423,10 +431,9 @@ static int mdss_mdp_video_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 		} else {
 			rc = 0;
 		}
-
-		mdss_mdp_ctl_notify(ctl,
-			rc ? MDP_NOTIFY_FRAME_TIMEOUT : MDP_NOTIFY_FRAME_DONE);
 	}
+	mdss_mdp_ctl_notify(ctl,
+			rc ? MDP_NOTIFY_FRAME_TIMEOUT : MDP_NOTIFY_FRAME_DONE);
 
 	if (ctx->wait_pending) {
 		ctx->wait_pending = 0;
@@ -499,95 +506,52 @@ static int mdss_mdp_video_display(struct mdss_mdp_ctl *ctl, void *arg)
 	return 0;
 }
 
-int mdss_mdp_video_copy_splash_screen(struct mdss_panel_data *pdata)
+int mdss_mdp_video_reconfigure_splash_done(struct mdss_mdp_ctl *ctl,
+	bool handoff)
 {
-	void *virt = NULL;
-	unsigned long bl_fb_addr = 0;
-	unsigned long *bl_fb_addr_va;
-	unsigned long  pipe_addr, pipe_src_size;
-	u32 height, width, rgb_size, bpp;
-	size_t size;
-	static struct ion_handle *ihdl;
-	struct ion_client *iclient = mdss_get_ionclient();
-	static ion_phys_addr_t phys;
+	struct mdss_panel_data *pdata = ctl->panel_data;
+	int i, ret = 0;
+	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(ctl->mfd);
+	struct mdss_mdp_video_ctx *ctx;
+	struct mdss_data_type *mdata = ctl->mdata;
 
-	pipe_addr = MDSS_MDP_REG_SSPP_OFFSET(3) +
-		MDSS_MDP_REG_SSPP_SRC0_ADDR;
-	pipe_src_size =
-		MDSS_MDP_REG_SSPP_OFFSET(3) + MDSS_MDP_REG_SSPP_SRC_SIZE;
-
-	bpp        = 3;
-	rgb_size   = MDSS_MDP_REG_READ(pipe_src_size);
-	bl_fb_addr = MDSS_MDP_REG_READ(pipe_addr);
-
-	height = (rgb_size >> 16) & 0xffff;
-	width  = rgb_size & 0xffff;
-	size = PAGE_ALIGN(height * width * bpp);
-	pr_debug("%s:%d splash_height=%d splash_width=%d Buffer size=%d\n",
-			__func__, __LINE__, height, width, size);
-
-	ihdl = ion_alloc(iclient, size, SZ_1M,
-			ION_HEAP(ION_QSECOM_HEAP_ID), 0);
-	if (IS_ERR_OR_NULL(ihdl)) {
-		pr_err("unable to alloc fbmem from ion (%p)\n", ihdl);
-		return -ENOMEM;
+	i = ctl->intf_num - MDSS_MDP_INTF0;
+	if (i < mdata->nintf) {
+		ctx = ((struct mdss_mdp_video_ctx *) mdata->video_intf) + i;
+		pr_debug("video Intf #%d base=%p", ctx->intf_num, ctx->base);
+	} else {
+		pr_err("Invalid intf number: %d\n", ctl->intf_num);
+		ret = -EINVAL;
+		goto error;
 	}
 
-	pdata->panel_info.splash_ihdl = ihdl;
+	if (!handoff) {
+		ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_CONT_SPLASH_BEGIN,
+					      NULL);
+		if (ret) {
+			pr_err("%s: Failed to handle 'CONT_SPLASH_BEGIN' event\n"
+				, __func__);
+			return ret;
+		}
 
-	virt = ion_map_kernel(iclient, ihdl);
-	ion_phys(iclient, ihdl, &phys, &size);
+		mdss_mdp_ctl_write(ctl, 0, MDSS_MDP_LM_BORDER_COLOR);
+		mdp_video_write(ctx, MDSS_MDP_REG_INTF_TIMING_ENGINE_EN, 0);
 
-	pr_debug("%s %d Allocating %u bytes at 0x%lx (%pa phys)\n",
-			__func__, __LINE__, size,
-			(unsigned long int)virt, &phys);
+		/* wait for 1 VSYNC for the pipe to be unstaged */
+		msleep(20);
 
-	bl_fb_addr_va = (unsigned long *)ioremap(bl_fb_addr, size);
+		ret = mdss_mdp_ctl_intf_event(ctl,
+			MDSS_EVENT_CONT_SPLASH_FINISH, NULL);
+	}
 
-	memcpy(virt, bl_fb_addr_va, size);
-
-	MDSS_MDP_REG_WRITE(pipe_addr, phys);
-	MDSS_MDP_REG_WRITE(MDSS_MDP_REG_CTL_FLUSH + MDSS_MDP_REG_CTL_OFFSET(0),
-			0x48);
-
-	return 0;
-}
-
-int mdss_mdp_video_reconfigure_splash_done(struct mdss_mdp_ctl *ctl)
-{
-	struct ion_client *iclient = mdss_get_ionclient();
-	struct mdss_panel_data *pdata;
-	int ret = 0, off;
-	int mdss_mdp_rev = MDSS_MDP_REG_READ(MDSS_MDP_REG_HW_VERSION);
-	int mdss_v2_intf_off = 0;
-
-	off = 0;
-
-	pdata = ctl->panel_data;
-
+error:
 	pdata->panel_info.cont_splash_enabled = 0;
 
-	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_CONT_SPLASH_BEGIN,
-				      NULL);
-	if (ret) {
-		pr_err("%s: Failed to handle 'CONT_SPLASH_BEGIN' event\n",
-					__func__);
-		return ret;
-	}
+	/* Give back the reserved memory to the system */
+	memblock_free(mdp5_data->splash_mem_addr, mdp5_data->splash_mem_size);
+	free_bootmem_late(mdp5_data->splash_mem_addr,
+				 mdp5_data->splash_mem_size);
 
-	mdss_mdp_ctl_write(ctl, 0, MDSS_MDP_LM_BORDER_COLOR);
-	off = MDSS_MDP_REG_INTF_OFFSET(ctl->intf_num);
-
-	if (mdss_mdp_rev >= MDSS_MDP_HW_REV_102)
-		mdss_v2_intf_off =  0xEC00;
-
-	MDSS_MDP_REG_WRITE(off + MDSS_MDP_REG_INTF_TIMING_ENGINE_EN -
-			mdss_v2_intf_off, 0);
-	/* wait for 1 VSYNC for the pipe to be unstaged */
-	msleep(20);
-	ion_free(iclient, pdata->panel_info.splash_ihdl);
-	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_CONT_SPLASH_FINISH,
-			NULL);
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 	return ret;
 }
@@ -631,6 +595,7 @@ int mdss_mdp_video_start(struct mdss_mdp_ctl *ctl)
 	ctx->intf_type = ctl->intf_type;
 	init_completion(&ctx->vsync_comp);
 	spin_lock_init(&ctx->vsync_lock);
+	mutex_init(&ctx->vsync_mtx);
 	atomic_set(&ctx->vsync_ref, 0);
 
 	mdss_mdp_set_intr_callback(MDSS_MDP_IRQ_INTF_VSYNC, ctl->intf_num,

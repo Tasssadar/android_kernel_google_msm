@@ -258,6 +258,9 @@ static int ion_no_pages_cache_ops(struct ion_client *client,
 		}
 	}
 
+	if (!outer_cache_op)
+		return -EINVAL;
+
 	outer_cache_op(buff_phys_start + offset,
 		       buff_phys_start + offset + length);
 
@@ -618,7 +621,6 @@ static struct heap_types_info {
 	MAKE_HEAP_TYPE_MAPPING(SYSTEM_CONTIG),
 	MAKE_HEAP_TYPE_MAPPING(CARVEOUT),
 	MAKE_HEAP_TYPE_MAPPING(CHUNK),
-	MAKE_HEAP_TYPE_MAPPING(IOMMU),
 	MAKE_HEAP_TYPE_MAPPING(DMA),
 	MAKE_HEAP_TYPE_MAPPING(CP),
 	MAKE_HEAP_TYPE_MAPPING(SECURE_DMA),

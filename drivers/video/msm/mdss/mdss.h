@@ -26,6 +26,8 @@
 #define MDSS_REG_WRITE(addr, val) writel_relaxed(val, mdss_res->mdp_base + addr)
 #define MDSS_REG_READ(addr) readl_relaxed(mdss_res->mdp_base + addr)
 
+#define MAX_DRV_SUP_MMB_BLKS	44
+
 enum mdss_mdp_clk_type {
 	MDSS_CLK_AHB,
 	MDSS_CLK_AXI,
@@ -56,10 +58,26 @@ struct mdss_hw_settings {
 	u32 val;
 };
 
+#define MDSS_IRQ_SUSPEND	-1
+#define MDSS_IRQ_RESUME		1
+#define MDSS_IRQ_REQ		0
+
+struct mdss_intr {
+	/* requested intr */
+	u32 req;
+	/* currently enabled intr */
+	u32 curr;
+	int state;
+	spinlock_t lock;
+};
+
 struct mdss_data_type {
 	u32 mdp_rev;
 	struct clk *mdp_clk[MDSS_MAX_CLK];
 	struct regulator *fs;
+	struct regulator *vdd_cx;
+	bool batfet_required;
+	struct regulator *batfet;
 	u32 max_mdp_clk_rate;
 
 	struct platform_device *pdev;
@@ -101,6 +119,9 @@ struct mdss_data_type {
 	u32 nvig_pipes;
 	u32 nrgb_pipes;
 	u32 ndma_pipes;
+
+	DECLARE_BITMAP(mmb_alloc_map, MAX_DRV_SUP_MMB_BLKS);
+
 	struct mdss_mdp_mixer *mixer_intf;
 	struct mdss_mdp_mixer *mixer_wb;
 	u32 nmixers_intf;
@@ -112,9 +133,12 @@ struct mdss_data_type {
 	void *video_intf;
 	u32 nintf;
 
+	u32 pp_bus_hdl;
 	struct mdss_ad_info *ad_cfgs;
 	u32 nad_cfgs;
 	struct workqueue_struct *ad_calc_wq;
+
+	struct mdss_intr hist_intr;
 
 	struct ion_client *iclient;
 	int iommu_attached;

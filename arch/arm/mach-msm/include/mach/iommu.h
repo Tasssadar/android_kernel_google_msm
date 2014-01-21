@@ -101,6 +101,7 @@ struct msm_iommu_bfb_settings {
  * @asid:         List of ASID and their usage count (index is ASID value).
  * @ctx_attach_count: Count of how many context are attached.
  * @bus_client  : Bus client needed to vote for bus bandwidth.
+ * @needs_rem_spinlock  : 1 if remote spinlock is needed, 0 otherwise
  *
  * A msm_iommu_drvdata holds the global driver data about a single piece
  * of an IOMMU hardware instance.
@@ -125,6 +126,7 @@ struct msm_iommu_drvdata {
 	int *asid;
 	unsigned int ctx_attach_count;
 	unsigned int bus_client;
+	int needs_rem_spinlock;
 };
 
 /**
@@ -188,21 +190,48 @@ struct msm_iommu_ctx_drvdata {
 	int attach_count;
 };
 
-struct msm_iommu_context_regs {
-	uint32_t far;
-	uint32_t par;
-	uint32_t fsr;
-	uint32_t fsynr0;
-	uint32_t fsynr1;
-	uint32_t ttbr0;
-	uint32_t ttbr1;
-	uint32_t sctlr;
-	uint32_t actlr;
-	uint32_t prrr;
-	uint32_t nmrr;
+enum dump_reg {
+	DUMP_REG_FIRST,
+	DUMP_REG_FAR0 = DUMP_REG_FIRST,
+	DUMP_REG_FAR1,
+	DUMP_REG_PAR0,
+	DUMP_REG_PAR1,
+	DUMP_REG_FSR,
+	DUMP_REG_FSYNR0,
+	DUMP_REG_FSYNR1,
+	DUMP_REG_TTBR0_0,
+	DUMP_REG_TTBR0_1,
+	DUMP_REG_TTBR1_0,
+	DUMP_REG_TTBR1_1,
+	DUMP_REG_SCTLR,
+	DUMP_REG_ACTLR,
+	DUMP_REG_PRRR,
+	DUMP_REG_MAIR0 = DUMP_REG_PRRR,
+	DUMP_REG_NMRR,
+	DUMP_REG_MAIR1 = DUMP_REG_NMRR,
+	MAX_DUMP_REGS,
 };
 
-void print_ctx_regs(struct msm_iommu_context_regs *regs);
+struct dump_regs_tbl {
+	/*
+	 * To keep things context-bank-agnostic, we only store the CB
+	 * register offset in `key'
+	 */
+	unsigned long key;
+	const char *name;
+	int offset;
+	int must_be_present;
+};
+extern struct dump_regs_tbl dump_regs_tbl[MAX_DUMP_REGS];
+
+#define COMBINE_DUMP_REG(upper, lower) (((u64) upper << 32) | lower)
+
+struct msm_iommu_context_reg {
+	uint32_t val;
+	bool valid;
+};
+
+void print_ctx_regs(struct msm_iommu_context_reg regs[]);
 
 /*
  * Interrupt handler for the IOMMU context fault interrupt. Hooking the

@@ -261,12 +261,14 @@ config ARCH_MSM8974
 	select MSM_GPIOMUX
 	select MULTI_IRQ_HANDLER
 	select MSM_MULTIMEDIA_USE_ION
+	select PM_DEVFREQ
+	select MSM_DEVFREQ_CPUBW
 	select MSM_PIL
 	select MSM_SPM_V2
 	select MSM_L2_SPM
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MAY_HAVE_SPARSE_IRQ
 	select SPARSE_IRQ
 	select MSM_RPM_SMD
@@ -281,9 +283,9 @@ config ARCH_MSM8974
 	select MSM_RPM_STATS_LOG
 	select QMI_ENCDEC
 	select MSM_ULTRASOUND_B
-	select MSM_LPM_TEST
 	select MSM_RPM_LOG
 	select ARCH_WANT_KMAP_ATOMIC_FLUSH
+	select KRAIT_REGULATOR
 	select ENABLE_VMALLOC_SAVINGS
 
 config ARCH_APQ8084
@@ -297,7 +299,7 @@ config ARCH_APQ8084
 	select MULTI_IRQ_HANDLER
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MAY_HAVE_SPARSE_IRQ
 	select SPARSE_IRQ
 	select REGULATOR
@@ -306,11 +308,18 @@ config ARCH_APQ8084
 	select ARCH_WANT_KMAP_ATOMIC_FLUSH
 	select MEMORY_HOLE_CARVEOUT
 	select QMI_ENCDEC
+	select MSM_SPM_V2
+	select MSM_L2_SPM
+	select MSM_RPM_SMD
+	select PM_DEVFREQ
+	select MSM_DEVFREQ_CPUBW
 	select ENABLE_VMALLOC_SAVINGS
 
 config ARCH_MPQ8092
 	bool "MPQ8092"
 	select ARCH_MSM_KRAITMP
+	select PM_DEVFREQ
+	select MSM_DEVFREQ_CPUBW
 	select GPIO_MSM_V3
 	select ARM_GIC
 	select MULTI_IRQ_HANDLER
@@ -329,6 +338,8 @@ config ARCH_FSM9900
 	select MSM_SCM
 	select MSM_GPIOMUX
 	select MULTI_IRQ_HANDLER
+	select PM_DEVFREQ
+	select MSM_DEVFREQ_CPUBW
 	select MSM_PIL
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
@@ -424,11 +435,14 @@ config ARCH_MSMKRYPTON
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
 	select MSM_SPM_V2
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MULTI_IRQ_HANDLER
 	select GPIO_MSM_V3
 	select MAY_HAVE_SPARSE_IRQ
 	select SPARSE_IRQ
+	select MSM_CORTEX_A7
+	select PM_DEVFREQ
+	select MSM_DEVFREQ_CPUBW
 
 config ARCH_MSM8610
 	bool "MSM8610"
@@ -452,14 +466,14 @@ config ARCH_MSM8610
 	select MSM_RPM_SMD
 	select MSM_SPM_V2
 	select MSM_L2_SPM
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MEMORY_HOLE_CARVEOUT
 	select MSM_BUS_SCALING
+	select MSM_CORTEX_A7
 	select CPU_FREQ_MSM
 	select CPU_FREQ
-	select CPU_FREQ_GOV_USERSPACE
-	select CPU_FREQ_GOV_ONDEMAND
-	select CPU_FREQ_GOV_POWERSAVE
+	select PM_DEVFREQ
+	select MSM_DEVFREQ_CPUBW
 	select MSM_PIL
 	select MSM_RUN_QUEUE_STATS
 	select ARM_HAS_SG_CHAIN
@@ -494,13 +508,14 @@ config ARCH_MSM8226
 	select MSM_RPM_SMD
 	select MSM_SPM_V2
 	select MSM_L2_SPM
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MEMORY_HOLE_CARVEOUT
 	select MSM_BUS_SCALING
+	select MSM_CORTEX_A7
 	select CPU_FREQ_MSM
 	select CPU_FREQ
-	select CPU_FREQ_GOV_USERSPACE
-	select CPU_FREQ_GOV_ONDEMAND
+	select PM_DEVFREQ
+	select MSM_DEVFREQ_CPUBW
 	select MSM_PIL
 	select MSM_RUN_QUEUE_STATS
 	select ARM_HAS_SG_CHAIN
@@ -521,13 +536,15 @@ config ARCH_MSMSAMARIUM
 	select ARM_GIC
 	select CPU_V7
 	select MSM_SCM
+	select PM_DEVFREQ
+	select MSM_DEVFREQ_CPUBW
 	select MSM_GPIOMUX
 	select MULTI_IRQ_HANDLER
 	select MSM_SPM_V2
 	select MSM_L2_SPM
 	select MSM_NATIVE_RESTART
 	select MSM_RESTART_V2
-	select MSM_PM8X60 if PM
+	select MSM_PM if PM
 	select MAY_HAVE_SPARSE_IRQ
 	select SPARSE_IRQ
 	select ARM_HAS_SG_CHAIN
@@ -568,6 +585,10 @@ config  ARCH_MSM_SCORPION
 config  ARCH_MSM_KRAIT
 	bool
 	select ARM_L1_CACHE_SHIFT_6
+	select DEVFREQ_GOV_MSM_CPUBW_HWMON
+
+config  MSM_CORTEX_A7
+	bool
 
 config  MSM_SMP
 	select HAVE_SMP
@@ -651,7 +672,7 @@ config MSM_MPM_OF
 config MSM_LPM_TEST
 	bool "Low Power Mode test framework"
 	depends on MSM_RPM || MSM_RPM_SMD
-	depends on MSM_PM8X60
+	depends on MSM_PM
 	help
 	  LPM_TEST is a test framework that assists in exercising the low
 	  power mode algorithm on MSM targets. This test framework tracks
@@ -1918,6 +1939,20 @@ config MSM_CPU_FREQ_MIN
 
 endif # CPU_FREQ_MSM
 
+config MSM_DEVFREQ_CPUBW
+	bool "Devfreq device for CPU<->DDR IB/AB BW voting"
+	depends on PM_DEVFREQ
+	select DEVFREQ_GOV_PERFORMANCE
+	select DEVFREQ_GOV_POWERSAVE
+	select DEVFREQ_GOV_USERSPACE
+	select DEVFREQ_GOV_MSM_CPUFREQ
+	default n
+	help
+	  Different devfreq governors use this devfreq device to make CPU to
+	  DDR IB/AB bandwidth votes. This driver provides a SoC topology
+	  agnostic interface to so that some of the devfreq governors can be
+	  shared across SoCs.
+
 config MSM_AVS_HW
 	bool "Enable Adaptive Voltage Scaling (AVS)"
 	default n
@@ -2340,8 +2375,8 @@ config SCORPION_Uni_45nm_BUG
 
 config MSM_BUSPM_DEV
 	tristate "MSM Bus Performance Monitor Kernel Module"
-	depends on (ARCH_MSM8X60 || ARCH_MSM8960 || ARCH_MSM8974)
-	default m
+	depends on MSM_BUS_SCALING
+	default n
 	help
 	  This kernel module is used to mmap() hardware registers for the
 	  performance monitors, counters, etc. The module can also be used to
@@ -2420,7 +2455,7 @@ config MSM_PM2
 	depends on PM
 	bool
 
-config MSM_PM8X60
+config MSM_PM
 	depends on PM
 	bool
 
@@ -3062,4 +3097,11 @@ config WALL_CLK_SYSFS
 	 Support the wallclk directory in sysfs filesystem to enable the
 	 wall clock simulation and read the current SFN.
 
+config KRAIT_REGULATOR
+	bool "Support Kraits powered via ganged regulators in the pmic"
+	help
+	 Certain MSMs have the Krait CPUs powered via a single supply
+	 line from the PMIC. This supply line is powered by multiple
+	 regulators running in ganged mode inside the PMIC. Enable
+	 this option to support such configurations.
 endif

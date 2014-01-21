@@ -13,6 +13,7 @@
 #define __QDSP6VOICE_H__
 
 #include <mach/qdsp6v2/apr.h>
+#include <mach/qdsp6v2/rtac.h>
 #include <linux/msm_ion.h>
 #include <sound/voice_params.h>
 
@@ -213,7 +214,8 @@ enum msm_audio_voc_rate {
 		VOC_8_RATE, /* 1/8 rate    */
 		VOC_4_RATE, /* 1/4 rate    */
 		VOC_2_RATE, /* 1/2 rate    */
-		VOC_1_RATE  /* Full rate   */
+		VOC_1_RATE,  /* Full rate   */
+		VOC_8_RATE_NC  /* Noncritical 1/8 rate   */
 };
 
 struct vss_istream_cmd_set_tty_mode_t {
@@ -977,6 +979,8 @@ struct vss_istream_cmd_set_packet_exchange_mode_t {
 /*CDMA EVRC-B vocoder modem format */
 #define VSS_MEDIA_ID_4GV_WB_MODEM	0x00010FC4
 /*CDMA EVRC-WB vocoder modem format */
+#define VSS_MEDIA_ID_4GV_NW_MODEM	0x00010FC5
+/*CDMA EVRC-NW vocoder modem format */
 
 #define VSS_IVOCPROC_CMD_CREATE_FULL_CONTROL_SESSION_V2	0x000112BF
 
@@ -1207,6 +1211,7 @@ struct cvp_set_mute_cmd {
 /* CB for up-link packets. */
 typedef void (*ul_cb_fn)(uint8_t *voc_pkt,
 			 uint32_t pkt_len,
+			 uint32_t timestamp,
 			 void *private_data);
 
 /* CB for down-link packets. */
@@ -1226,6 +1231,8 @@ struct mvs_driver_info {
 	ul_cb_fn ul_cb;
 	dl_cb_fn dl_cb;
 	void *private_data;
+	uint32_t evrc_min_rate;
+	uint32_t evrc_max_rate;
 };
 
 struct dtmf_driver_info {
@@ -1328,6 +1335,10 @@ struct common_data {
 
 	struct mem_map_table cal_mem_map_table;
 	uint32_t cal_mem_handle;
+
+	struct mem_map_table rtac_mem_map_table;
+	uint32_t rtac_mem_handle;
+
 	struct cal_mem cvp_cal;
 	struct cal_mem cvs_cal;
 
@@ -1355,7 +1366,9 @@ void voc_register_dtmf_rx_detection_cb(dtmf_rx_det_cb_fn dtmf_rx_ul_cb,
 void voc_config_vocoder(uint32_t media_type,
 			uint32_t rate,
 			uint32_t network_type,
-			uint32_t dtx_mode);
+			uint32_t dtx_mode,
+			uint32_t evrc_min_rate,
+			uint32_t evrc_max_rate);
 
 enum {
 	DEV_RX = 0,
@@ -1431,6 +1444,9 @@ int is_voc_initialized(void);
 int voc_register_vocproc_vol_table(void);
 int voc_deregister_vocproc_vol_table(void);
 int voice_unmap_cal_blocks(void);
+
+int voc_map_rtac_block(struct rtac_cal_block_data *cal_block);
+int voc_unmap_rtac_block(uint32_t *mem_map_handle);
 
 uint32_t voc_get_session_id(char *name);
 

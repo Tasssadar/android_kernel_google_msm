@@ -44,6 +44,7 @@
 
 
 static DEFINE_MUTEX(msm_iommu_lock);
+struct dump_regs_tbl dump_regs_tbl[MAX_DUMP_REGS];
 
 static int __enable_regulators(struct msm_iommu_drvdata *drvdata)
 {
@@ -270,12 +271,46 @@ static void __reset_iommu(void __iomem *base)
 	mb();
 }
 
+#ifdef CONFIG_IOMMU_NON_SECURE
+static void __reset_iommu_secure(void __iomem *base)
+{
+	SET_NSACR(base, 0);
+	SET_NSCR2(base, 0);
+	SET_NSGFAR(base, 0);
+	SET_NSGFSRRESTORE(base, 0);
+	mb();
+}
+
+static void __program_iommu_secure(void __iomem *base)
+{
+	SET_NSCR0_SMCFCFG(base, 1);
+	SET_NSCR0_USFCFG(base, 1);
+	SET_NSCR0_STALLD(base, 1);
+	SET_NSCR0_GCFGFIE(base, 1);
+	SET_NSCR0_GCFGFRE(base, 1);
+	SET_NSCR0_GFIE(base, 1);
+	SET_NSCR0_GFRE(base, 1);
+	SET_NSCR0_CLIENTPD(base, 0);
+}
+
+#else
+static inline void __reset_iommu_secure(void __iomem *base)
+{
+}
+
+static inline void __program_iommu_secure(void __iomem *base)
+{
+}
+
+#endif
+
 /*
  * May only be called for non-secure iommus
  */
 static void __program_iommu(void __iomem *base)
 {
 	__reset_iommu(base);
+	__reset_iommu_secure(base);
 
 	SET_CR0_SMCFCFG(base, 1);
 	SET_CR0_USFCFG(base, 1);
@@ -285,6 +320,8 @@ static void __program_iommu(void __iomem *base)
 	SET_CR0_GFIE(base, 1);
 	SET_CR0_GFRE(base, 1);
 	SET_CR0_CLIENTPD(base, 0);
+
+	__program_iommu_secure(base);
 
 	mb(); /* Make sure writes complete before returning */
 }
@@ -823,12 +860,19 @@ static int msm_iommu_domain_has_cap(struct iommu_domain *domain,
 	return 0;
 }
 
-void print_ctx_regs(struct msm_iommu_context_regs *regs)
+void print_ctx_regs(struct msm_iommu_context_reg regs[])
 {
-	uint32_t fsr = regs->fsr;
+	uint32_t fsr = regs[DUMP_REG_FSR].val;
+	u64 ttbr;
 
-	pr_err("FAR    = %08x    PAR    = %08x\n",
-		 regs->far, regs->par);
+	pr_err("FAR    = %016llx\n",
+		COMBINE_DUMP_REG(
+			regs[DUMP_REG_FAR1].val,
+			regs[DUMP_REG_FAR0].val));
+	pr_err("PAR    = %016llx\n",
+		COMBINE_DUMP_REG(
+			regs[DUMP_REG_PAR1].val,
+			regs[DUMP_REG_PAR0].val));
 	pr_err("FSR    = %08x [%s%s%s%s%s%s%s%s%s]\n", fsr,
 			(fsr & 0x02) ? "TF " : "",
 			(fsr & 0x04) ? "AFF " : "",
@@ -841,31 +885,39 @@ void print_ctx_regs(struct msm_iommu_context_regs *regs)
 			(fsr & 0x80000000) ? "MULTI " : "");
 
 	pr_err("FSYNR0 = %08x    FSYNR1 = %08x\n",
-		 regs->fsynr0, regs->fsynr1);
-	pr_err("TTBR0  = %08x    TTBR1  = %08x\n",
-		 regs->ttbr0, regs->ttbr1);
+		 regs[DUMP_REG_FSYNR0].val, regs[DUMP_REG_FSYNR1].val);
+
+	ttbr = COMBINE_DUMP_REG(regs[DUMP_REG_TTBR0_1].val,
+				regs[DUMP_REG_TTBR0_0].val);
+	if (regs[DUMP_REG_TTBR0_1].valid)
+		pr_err("TTBR0  = %016llx\n", ttbr);
+	else
+		pr_err("TTBR0  = %016llx (32b)\n", ttbr);
+
+	ttbr = COMBINE_DUMP_REG(regs[DUMP_REG_TTBR1_1].val,
+				regs[DUMP_REG_TTBR1_0].val);
+
+	if (regs[DUMP_REG_TTBR1_1].valid)
+		pr_err("TTBR1  = %016llx\n", ttbr);
+	else
+		pr_err("TTBR1  = %016llx (32b)\n", ttbr);
+
 	pr_err("SCTLR  = %08x    ACTLR  = %08x\n",
-		 regs->sctlr, regs->actlr);
+		 regs[DUMP_REG_SCTLR].val, regs[DUMP_REG_ACTLR].val);
 	pr_err("PRRR   = %08x    NMRR   = %08x\n",
-		 regs->prrr, regs->nmrr);
+		 regs[DUMP_REG_PRRR].val, regs[DUMP_REG_NMRR].val);
 }
 
 static void __print_ctx_regs(void __iomem *base, int ctx, unsigned int fsr)
 {
-	struct msm_iommu_context_regs regs = {
-		.far = GET_FAR(base, ctx),
-		.par = GET_PAR(base, ctx),
-		.fsr = fsr,
-		.fsynr0 = GET_FSYNR0(base, ctx),
-		.fsynr1 = GET_FSYNR1(base, ctx),
-		.ttbr0 = GET_TTBR0(base, ctx),
-		.ttbr1 = GET_TTBR1(base, ctx),
-		.sctlr = GET_SCTLR(base, ctx),
-		.actlr = GET_ACTLR(base, ctx),
-		.prrr = GET_PRRR(base, ctx),
-		.nmrr = GET_NMRR(base, ctx),
-	};
-	print_ctx_regs(&regs);
+	struct msm_iommu_context_reg regs[MAX_DUMP_REGS];
+	unsigned int i;
+
+	for (i = DUMP_REG_FIRST; i < MAX_DUMP_REGS; ++i) {
+		regs[i].val = GET_CTX_REG(dump_regs_tbl[i].key, base, ctx);
+		regs[i].valid = 1;
+	}
+	print_ctx_regs(regs);
 }
 
 irqreturn_t msm_iommu_fault_handler_v2(int irq, void *dev_id)
@@ -942,6 +994,32 @@ static phys_addr_t msm_iommu_get_pt_base_addr(struct iommu_domain *domain)
 	return __pa(priv->pt.fl_table);
 }
 
+#define DUMP_REG_INIT(dump_reg, cb_reg, mbp)			\
+	do {							\
+		dump_regs_tbl[dump_reg].key = cb_reg;		\
+		dump_regs_tbl[dump_reg].name = #cb_reg;		\
+		dump_regs_tbl[dump_reg].must_be_present = mbp;	\
+	} while (0)
+
+static void msm_iommu_build_dump_regs_table(void)
+{
+	DUMP_REG_INIT(DUMP_REG_FAR0,	CB_FAR,       1);
+	DUMP_REG_INIT(DUMP_REG_FAR1,	CB_FAR + 4,   1);
+	DUMP_REG_INIT(DUMP_REG_PAR0,	CB_PAR,       1);
+	DUMP_REG_INIT(DUMP_REG_PAR1,	CB_PAR + 4,   1);
+	DUMP_REG_INIT(DUMP_REG_FSR,	CB_FSR,       1);
+	DUMP_REG_INIT(DUMP_REG_FSYNR0,	CB_FSYNR0,    1);
+	DUMP_REG_INIT(DUMP_REG_FSYNR1,	CB_FSYNR1,    1);
+	DUMP_REG_INIT(DUMP_REG_TTBR0_0,	CB_TTBR0,     1);
+	DUMP_REG_INIT(DUMP_REG_TTBR0_1,	CB_TTBR0 + 4, 0);
+	DUMP_REG_INIT(DUMP_REG_TTBR1_0,	CB_TTBR1,     1);
+	DUMP_REG_INIT(DUMP_REG_TTBR1_1,	CB_TTBR1 + 4, 0);
+	DUMP_REG_INIT(DUMP_REG_SCTLR,	CB_SCTLR,     1);
+	DUMP_REG_INIT(DUMP_REG_ACTLR,	CB_ACTLR,     1);
+	DUMP_REG_INIT(DUMP_REG_PRRR,	CB_PRRR,      1);
+	DUMP_REG_INIT(DUMP_REG_NMRR,	CB_NMRR,      1);
+}
+
 static struct iommu_ops msm_iommu_ops = {
 	.domain_init = msm_iommu_domain_init,
 	.domain_destroy = msm_iommu_domain_destroy,
@@ -961,6 +1039,8 @@ static int __init msm_iommu_init(void)
 {
 	msm_iommu_pagetable_init();
 	bus_set_iommu(&platform_bus_type, &msm_iommu_ops);
+	msm_iommu_build_dump_regs_table();
+
 	return 0;
 }
 

@@ -51,6 +51,7 @@ static void __iomem *virt_bases[N_BASES];
 
 /* Mux source select values */
 #define xo_source_val  0
+#define xo_a_clk_source_val  0
 #define gpll0_source_val 1
 #define gpll1_source_val 2
 
@@ -322,6 +323,7 @@ static struct branch_clk oxilicx_axi_clk;
 #define CAMSS_VFE_VFE_AHB_CBCR                             (0x36B8)
 #define CAMSS_VFE_VFE_AXI_CBCR                             (0x36BC)
 #define CAMSS_CSI_VFE0_CBCR                                (0x3704)
+#define CAMSS_MICRO_BCR                                    (0x3490)
 #define OXILI_GFX3D_CBCR                                   (0x4028)
 #define OXILICX_AXI_CBCR                                   (0x4038)
 #define OXILICX_AHB_CBCR                                   (0x403C)
@@ -346,7 +348,6 @@ static struct branch_clk oxilicx_axi_clk;
 #define GPLL1_N_VAL                                        (0x004C)
 #define GPLL1_USER_CTL                                     (0x0050)
 #define GPLL1_STATUS                                       (0x005C)
-#define PERIPH_NOC_AHB_CBCR                                (0x0184)
 #define NOC_CONF_XPU_AHB_CBCR                              (0x01C0)
 #define MMSS_NOC_CFG_AHB_CBCR                              (0x024C)
 #define MSS_CFG_AHB_CBCR                                   (0x0280)
@@ -440,6 +441,7 @@ static struct branch_clk oxilicx_axi_clk;
 #define Q6SS_AHB_LFABIF_CBCR                               (0x22000)
 #define Q6SS_AHBM_CBCR                                     (0x22004)
 #define Q6SS_XO_CBCR                                       (0x26000)
+#define KPSS_AHB_CMD_RCGR                                  (0x120C)
 
 static unsigned int soft_vote_gpll0;
 
@@ -1276,6 +1278,7 @@ static struct local_vote_clk gcc_ce1_clk = {
 	.en_mask = BIT(5),
 	.base = &virt_bases[GCC_BASE],
 	.c = {
+		.parent = &ce1_clk_src.c,
 		.dbg_name = "gcc_ce1_clk",
 		.ops = &clk_ops_vote,
 		CLK_INIT(gcc_ce1_clk.c),
@@ -1383,17 +1386,6 @@ static struct branch_clk gcc_pdm_xo4_clk = {
 		.parent = &xo.c,
 		.ops = &clk_ops_branch,
 		CLK_INIT(gcc_pdm_xo4_clk.c),
-	},
-};
-
-static struct branch_clk gcc_periph_noc_ahb_clk = {
-	.cbcr_reg = PERIPH_NOC_AHB_CBCR,
-	.has_sibling = 1,
-	.base = &virt_bases[GCC_BASE],
-	.c = {
-		.dbg_name = "gcc_periph_noc_ahb_clk",
-		.ops = &clk_ops_branch,
-		CLK_INIT(gcc_periph_noc_ahb_clk.c),
 	},
 };
 
@@ -1563,7 +1555,6 @@ static struct branch_clk gcc_usb_hsic_system_clk = {
 };
 
 static struct measure_mux_entry measure_mux_GCC[] = {
-	{ &gcc_periph_noc_ahb_clk.c,  GCC_BASE, 0x0010 },
 	{ &gcc_mss_cfg_ahb_clk.c,  GCC_BASE, 0x0030 },
 	{ &gcc_mss_q6_bimc_axi_clk.c,  GCC_BASE, 0x0031 },
 	{ &gcc_usb_hsic_ahb_clk.c,  GCC_BASE, 0x0058 },
@@ -1891,7 +1882,7 @@ static struct rcg_clk vcodec0_clk_src = {
 	.c = {
 		.dbg_name = "vcodec0_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOW, 66670000, NOMINAL, 133330000, HIGH,
+		VDD_DIG_FMAX_MAP3(LOW, 66700000, NOMINAL, 133330000, HIGH,
 			160000000),
 		CLK_INIT(vcodec0_clk_src.c),
 	},
@@ -2360,6 +2351,7 @@ static struct branch_clk camss_mclk1_clk = {
 static struct branch_clk camss_micro_ahb_clk = {
 	.cbcr_reg = CAMSS_MICRO_AHB_CBCR,
 	.has_sibling = 1,
+	.bcr_reg = CAMSS_MICRO_BCR,
 	.base = &virt_bases[MMSS_BASE],
 	.c = {
 		.dbg_name = "camss_micro_ahb_clk",
@@ -2816,6 +2808,11 @@ static struct pll_freq_tbl apcs_pll_freq[] = {
 	F_APCS_PLL( 998400000, 52, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1094400000, 57, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1190400000, 62, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1305600000, 68, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1344000000, 70, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1401600000, 73, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1497600000, 78, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1593600000, 83, 0x0, 0x1, 0x0, 0x0, 0x0),
 	PLL_F_END
 };
 
@@ -2846,11 +2843,27 @@ static struct pll_clk a7sspll = {
 		},
 		.num_fmax = VDD_SR2_PLL_NUM,
 		CLK_INIT(a7sspll.c),
-		/*
-		 * Need to skip handoff of the acpu pll to avoid
-		 * turning off the pll when the cpu is using it
-		 */
-		.flags = CLKFLAG_SKIP_HANDOFF,
+	},
+};
+
+static struct clk_freq_tbl ftbl_kpss_ahb_clk[] = {
+	F_GCC(19200000, xo_a_clk, 0, 0, 0),
+	F_GCC(37500000, gpll0, 16, 0, 0),
+	F_GCC(75000000, gpll0,  8, 0, 0),
+	F_END
+};
+
+static struct rcg_clk kpss_ahb_clk_src = {
+	.cmd_rcgr_reg = KPSS_AHB_CMD_RCGR,
+	.set_rate = set_rate_hid,
+	.freq_tbl = ftbl_kpss_ahb_clk,
+	.current_freq = &rcg_dummy_freq,
+	.base = &virt_bases[GCC_BASE],
+	.c = {
+		.dbg_name = "kpss_ahb_clk_src",
+		.ops = &clk_ops_rcg,
+		VDD_DIG_FMAX_MAP2(LOW, 37500000, NOMINAL, 75000000),
+		CLK_INIT(kpss_ahb_clk_src.c),
 	},
 };
 
@@ -2879,6 +2892,7 @@ static DEFINE_CLK_BRANCH_VOTER(cxo_pil_lpass_clk, &xo.c);
 static DEFINE_CLK_BRANCH_VOTER(cxo_pil_mss_clk, &xo.c);
 static DEFINE_CLK_BRANCH_VOTER(cxo_wlan_clk, &xo.c);
 static DEFINE_CLK_BRANCH_VOTER(cxo_pil_pronto_clk, &xo.c);
+static DEFINE_CLK_BRANCH_VOTER(cxo_lpm_clk, &xo.c);
 
 
 #ifdef CONFIG_DEBUG_FS
@@ -3090,6 +3104,9 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("apc3_m_clk", apc3_m_clk, ""),
 	CLK_LOOKUP("l2_m_clk", l2_m_clk, ""),
 
+	/* LPM Resources */
+	CLK_LOOKUP("xo",          cxo_lpm_clk.c, "fc4281d0.qcom,mpm"),
+
 	/* PIL-LPASS */
 	CLK_LOOKUP("xo",          cxo_pil_lpass_clk.c, "fe200000.qcom,lpass"),
 	CLK_LOOKUP("core_clk",          q6ss_xo_clk.c, "fe200000.qcom,lpass"),
@@ -3117,6 +3134,9 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("xo",     xo_a_clk.c, "f9011050.qcom,acpuclk"),
 	CLK_LOOKUP("gpll0",  gpll0_ao.c, "f9011050.qcom,acpuclk"),
 	CLK_LOOKUP("a7sspll", a7sspll.c, "f9011050.qcom,acpuclk"),
+	CLK_LOOKUP("clk-4",  gpll0_ao.c, "f9011050.qcom,clock-a7"),
+	CLK_LOOKUP("clk-5", a7sspll.c, "f9011050.qcom,clock-a7"),
+	CLK_LOOKUP("kpss_ahb", kpss_ahb_clk_src.c, ""),
 
 	/* WCNSS CLOCKS */
 	CLK_LOOKUP("xo", cxo_wlan_clk.c, "fb000000.qcom,wcnss-wlan"),
@@ -3581,6 +3601,9 @@ static void __init msm8226_clock_post_init(void)
 	clk_set_rate(&mclk1_clk_src.c, mclk1_clk_src.freq_tbl[0].freq_hz);
 	clk_set_rate(&esc0_clk_src.c, esc0_clk_src.freq_tbl[0].freq_hz);
 	clk_set_rate(&vsync_clk_src.c, vsync_clk_src.freq_tbl[0].freq_hz);
+
+	clk_set_rate(&kpss_ahb_clk_src.c, 19200000);
+	clk_prepare_enable(&kpss_ahb_clk_src.c);
 }
 
 #define GCC_CC_PHYS		0xFC400000
