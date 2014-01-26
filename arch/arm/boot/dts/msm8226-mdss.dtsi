@@ -19,6 +19,8 @@
 		interrupts = <0 72 0>;
 		vdd-supply = <&gdsc_mdss>;
 
+		qcom,max-bandwidth-low-kbps = <1660000>;
+		qcom,max-bandwidth-high-kbps = <1660000>;
 		qcom,max-clk-rate = <200000000>;
 		qcom,mdss-pipe-vig-off = <0x00001200>;
 		qcom,mdss-pipe-rgb-off = <0x00001E00>;
@@ -26,6 +28,11 @@
 		qcom,mdss-pipe-vig-fetch-id = <1>;
 		qcom,mdss-pipe-rgb-fetch-id = <7>;
 		qcom,mdss-pipe-dma-fetch-id = <4>;
+
+		qcom,mdss-pipe-vig-xin-id = <0>;
+		qcom,mdss-pipe-rgb-xin-id = <1>;
+		qcom,mdss-pipe-dma-xin-id = <2>;
+
 		qcom,mdss-smp-data = <7 4096>;
 
 		qcom,mdss-ctl-off = <0x00000600 0x00000700>;

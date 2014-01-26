@@ -51,13 +51,21 @@ struct mdss_mdp_rotator_session {
 	struct work_struct commit_work;
 };
 
-static inline u32 mdss_mdp_get_rotator_dst_format(u32 in_format)
+static inline u32 mdss_mdp_get_rotator_dst_format(u32 in_format, u8 in_rot90)
 {
 	switch (in_format) {
 	case MDP_RGB_565:
 	case MDP_BGR_565:
-		return MDP_RGB_888;
+		if (in_rot90)
+			return MDP_RGB_888;
+		else
+			return in_format;
 	case MDP_Y_CBCR_H2V2_VENUS:
+	case MDP_Y_CBCR_H2V2:
+		if (in_rot90)
+			return MDP_Y_CRCB_H2V2;
+		else
+			return in_format;
 	case MDP_Y_CB_CR_H2V2:
 	case MDP_Y_CR_CB_GH2V2:
 	case MDP_Y_CR_CB_H2V2:
@@ -67,14 +75,13 @@ static inline u32 mdss_mdp_get_rotator_dst_format(u32 in_format)
 	}
 }
 
-struct mdss_mdp_rotator_session *mdss_mdp_rotator_session_alloc(void);
-struct mdss_mdp_rotator_session *mdss_mdp_rotator_session_get(u32 session_id);
-
-int mdss_mdp_rotator_setup(struct mdss_mdp_rotator_session *rot);
-int mdss_mdp_rotator_queue(struct mdss_mdp_rotator_session *rot);
+int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
+			   struct mdp_overlay *req);
 int mdss_mdp_rotator_release(struct mdss_mdp_rotator_session *rot);
 int mdss_mdp_rotator_release_all(void);
-int mdss_mdp_rotator_busy_wait_ex(struct mdss_mdp_rotator_session *rot);
 struct msm_sync_pt_data *mdss_mdp_rotator_sync_pt_get(
 	struct msm_fb_data_type *mfd, const struct mdp_buf_sync *buf_sync);
+int mdss_mdp_rotator_play(struct msm_fb_data_type *mfd,
+			    struct msmfb_overlay_data *req);
+int mdss_mdp_rotator_unset(int ndx);
 #endif /* MDSS_MDP_ROTATOR_H */

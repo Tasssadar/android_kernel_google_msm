@@ -85,6 +85,7 @@ enum {
  *				display state from boot loader to panel driver.
  *				The event handler will enable the panel and
  *				vote for the display clocks.
+ * @MDSS_EVENT_PANEL_UPDATE_FPS: Event to update the frame rate of the panel.
  * @MDSS_EVENT_FB_REGISTERED:	Called after fb dev driver has been registered,
  *				panel driver gets ptr to struct fb_info which
  *				holds fb dev information.
@@ -92,6 +93,7 @@ enum {
 				 - 0 clock disable
 				 - 1 clock enable
  * @MDSS_EVENT_DSI_CMDLIST_KOFF: kickoff sending dcs command from command list
+ * @MDSS_EVENT_ENABLE_PARTIAL_UPDATE: Event to update ROI of the panel.
  */
 enum mdss_intf_events {
 	MDSS_EVENT_RESET = 1,
@@ -105,9 +107,11 @@ enum mdss_intf_events {
 	MDSS_EVENT_CHECK_PARAMS,
 	MDSS_EVENT_CONT_SPLASH_BEGIN,
 	MDSS_EVENT_CONT_SPLASH_FINISH,
+	MDSS_EVENT_PANEL_UPDATE_FPS,
 	MDSS_EVENT_FB_REGISTERED,
 	MDSS_EVENT_PANEL_CLK_CTRL,
 	MDSS_EVENT_DSI_CMDLIST_KOFF,
+	MDSS_EVENT_ENABLE_PARTIAL_UPDATE,
 };
 
 /**
@@ -222,6 +226,11 @@ struct mipi_panel_info {
 	char hw_vsync_mode;
 };
 
+enum dynamic_fps_update {
+	DFPS_SUSPEND_RESUME_MODE,
+	DFPS_IMMEDIATE_CLK_UPDATE_MODE,
+};
+
 enum lvds_mode {
 	LVDS_SINGLE_CHANNEL_MODE,
 	LVDS_DUAL_CHANNEL_MODE,
@@ -272,12 +281,20 @@ struct mdss_panel_info {
 	u32 is_3d_panel;
 	u32 out_format;
 	u32 vic; /* video identification code */
+	u32 roi_x;
+	u32 roi_y;
+	u32 roi_w;
+	u32 roi_h;
 	int bklt_ctrl;	/* backlight ctrl */
 	int pwm_pmic_gpio;
 	int pwm_lpg_chan;
 	int pwm_period;
+	bool dynamic_fps;
+	char dfps_update;
+	int new_fps;
 
 	u32 cont_splash_enabled;
+	u32 partial_update_enabled;
 	struct ion_handle *splash_ihdl;
 	u32 panel_power_on;
 
@@ -359,6 +376,20 @@ static inline int mdss_panel_get_vtotal(struct mdss_panel_info *pinfo)
 	return pinfo->yres + pinfo->lcdc.v_back_porch +
 			pinfo->lcdc.v_front_porch +
 			pinfo->lcdc.v_pulse_width;
+}
+
+/*
+ * mdss_panel_get_htotal() - return panel horizontal width
+ * @pinfo:	Pointer to panel info containing all panel information
+ *
+ * Returns the total width of the panel including any blanking regions
+ * which are not visible to user but used for calculations.
+ */
+static inline int mdss_panel_get_htotal(struct mdss_panel_info *pinfo)
+{
+	return pinfo->xres + pinfo->lcdc.h_back_porch +
+			pinfo->lcdc.h_front_porch +
+			pinfo->lcdc.h_pulse_width;
 }
 
 int mdss_register_panel(struct platform_device *pdev,
