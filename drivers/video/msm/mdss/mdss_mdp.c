@@ -730,7 +730,7 @@ static int mdss_mdp_irq_clk_setup(struct mdss_data_type *mdata)
 
 	pr_debug("max mdp clk rate=%d\n", mdata->max_mdp_clk_rate);
 
-	ret = request_irq(mdata->irq, mdss_irq_handler,
+	ret = devm_request_irq(&mdata->pdev->dev, mdata->irq, mdss_irq_handler,
 			 IRQF_DISABLED,	"MDSS", mdata);
 	if (ret) {
 		pr_err("mdp request_irq() failed!\n");
@@ -1001,6 +1001,8 @@ static ssize_t mdss_mdp_show_capabilities(struct device *dev,
 		SPRINT(" bwc");
 	if (mdata->has_decimation)
 		SPRINT(" decimation");
+	if (mdata->highest_bank_bit)
+		SPRINT(" tile_format");
 	SPRINT("\n");
 
 	return cnt;
@@ -1742,6 +1744,10 @@ static int mdss_mdp_parse_dt_misc(struct platform_device *pdev)
 		"qcom,mdss-has-wfd-blk");
 	prop = of_find_property(pdev->dev.of_node, "batfet-supply", NULL);
 	mdata->batfet_required = prop ? true : false;
+	rc = of_property_read_u32(pdev->dev.of_node,
+		 "qcom,mdss-highest-bank-bit", &(mdata->highest_bank_bit));
+	if (rc)
+		pr_debug("Could not read optional property: highest bank bit\n");
 
 	return 0;
 }
@@ -1994,11 +2000,12 @@ static int mdss_mdp_resume(struct platform_device *pdev)
 static int mdss_mdp_runtime_resume(struct device *dev)
 {
 	struct mdss_data_type *mdata = dev_get_drvdata(dev);
+	bool device_on = true;
 	if (!mdata)
 		return -ENODEV;
 
 	dev_dbg(dev, "pm_runtime: resuming...\n");
-
+	device_for_each_child(dev, &device_on, mdss_fb_suspres_panel);
 	mdss_mdp_footswitch_ctrl(mdata, true);
 
 	return 0;
@@ -2018,6 +2025,7 @@ static int mdss_mdp_runtime_idle(struct device *dev)
 static int mdss_mdp_runtime_suspend(struct device *dev)
 {
 	struct mdss_data_type *mdata = dev_get_drvdata(dev);
+	bool device_on = false;
 	if (!mdata)
 		return -ENODEV;
 	dev_dbg(dev, "pm_runtime: suspending...\n");
@@ -2026,6 +2034,7 @@ static int mdss_mdp_runtime_suspend(struct device *dev)
 		pr_err("MDP suspend failed\n");
 		return -EBUSY;
 	}
+	device_for_each_child(dev, &device_on, mdss_fb_suspres_panel);
 	mdss_mdp_footswitch_ctrl(mdata, false);
 
 	return 0;

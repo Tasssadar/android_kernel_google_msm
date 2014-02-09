@@ -127,7 +127,11 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 	if (notify > NOTIFY_UPDATE_POWER_OFF)
 		return -EINVAL;
 
-	if (notify == NOTIFY_UPDATE_START) {
+	if (mfd->update.is_suspend) {
+		to_user = NOTIFY_TYPE_SUSPEND;
+		mfd->update.is_suspend = 0;
+		ret = 1;
+	} else if (notify == NOTIFY_UPDATE_START) {
 		INIT_COMPLETION(mfd->update.comp);
 		ret = wait_for_completion_timeout(
 						&mfd->update.comp, 4 * HZ);
@@ -730,6 +734,7 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 				mfd->panel_power_on = true;
 			mutex_lock(&mfd->update.lock);
 			mfd->update.type = NOTIFY_TYPE_UPDATE;
+			mfd->update.is_suspend = 0;
 			mutex_unlock(&mfd->update.lock);
 		}
 		break;
@@ -744,7 +749,9 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 
 			mutex_lock(&mfd->update.lock);
 			mfd->update.type = NOTIFY_TYPE_SUSPEND;
+			mfd->update.is_suspend = 1;
 			mutex_unlock(&mfd->update.lock);
+			complete(&mfd->update.comp);
 			del_timer(&mfd->no_update.timer);
 			mfd->no_update.value = NOTIFY_TYPE_SUSPEND;
 			complete(&mfd->no_update.comp);
@@ -1637,9 +1644,14 @@ static int __mdss_fb_display_thread(void *data)
 		pr_info("%s: set priority failed\n", __func__);
 
 	while (1) {
-		wait_event(mfd->commit_wait_q,
+		ret = wait_event_interruptible(mfd->commit_wait_q,
 				(atomic_read(&mfd->commits_pending) ||
 				 kthread_should_stop()));
+
+		if (ret) {
+			pr_info("%s: interrupted", __func__);
+			continue;
+		}
 
 		if (kthread_should_stop())
 			break;
@@ -2307,3 +2319,27 @@ int __init mdss_fb_init(void)
 }
 
 module_init(mdss_fb_init);
+
+int mdss_fb_suspres_panel(struct device *dev, void *data)
+{
+	struct msm_fb_data_type *mfd;
+	int rc;
+	u32 event;
+
+	if (!data) {
+		pr_err("Device state not defined\n");
+		return -EINVAL;
+	}
+	mfd = dev_get_drvdata(dev);
+	if (!mfd)
+		return 0;
+
+	event = *((bool *) data) ? MDSS_EVENT_RESUME : MDSS_EVENT_SUSPEND;
+
+	rc = mdss_fb_send_panel_event(mfd, event, NULL);
+	if (rc)
+		pr_warn("unable to %s fb%d (%d)\n",
+			event == MDSS_EVENT_RESUME ? "resume" : "suspend",
+			mfd->index, rc);
+	return rc;
+}

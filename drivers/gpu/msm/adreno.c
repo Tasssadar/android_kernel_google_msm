@@ -1154,11 +1154,8 @@ static int adreno_iommu_setstate(struct kgsl_device *device,
 	num_iommu_units = kgsl_mmu_get_num_iommu_units(&device->mmu);
 
 	context = kgsl_context_get(device, context_id);
-	if (!context) {
-		kgsl_mmu_device_setstate(&device->mmu, flags);
-		return 0;
-	}
-	adreno_ctx = ADRENO_CONTEXT(context);
+	if (context)
+		adreno_ctx = ADRENO_CONTEXT(context);
 
 	result = kgsl_mmu_enable_clk(&device->mmu, KGSL_IOMMU_CONTEXT_USER);
 
@@ -3069,7 +3066,7 @@ static int adreno_waittimestamp(struct kgsl_device *device,
 		return -EINVAL;
 
 	ret = adreno_drawctxt_wait(ADRENO_DEVICE(device), context,
-		timestamp, msecs_to_jiffies(msecs));
+		timestamp, msecs);
 
 	/* If the context got invalidated then return a specific error */
 	drawctxt = ADRENO_CONTEXT(context);

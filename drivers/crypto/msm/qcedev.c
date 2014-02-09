@@ -1339,7 +1339,7 @@ static int qcedev_vbuf_ablk_cipher_max_xfer(struct qcedev_async_req *areq,
 				areq->cipher_op_req.vbuf.src[0].len))
 		return -EFAULT;
 
-	k_align_src += areq->cipher_op_req.vbuf.src[0].len;
+	k_align_src += byteoffset + areq->cipher_op_req.vbuf.src[0].len;
 
 	for (i = 1; i < areq->cipher_op_req.entries; i++) {
 		user_src =
@@ -1602,11 +1602,6 @@ static int qcedev_vbuf_ablk_cipher(struct qcedev_async_req *areq,
 static int qcedev_check_cipher_key(struct qcedev_cipher_op_req *req,
 						struct qcedev_control *podev)
 {
-
-	if (req->encklen < 0) {
-		pr_err("%s: Invalid key size: %d\n", __func__, req->encklen);
-		return -EINVAL;
-	}
 	/* if intending to use HW key make sure key fields are set
 	 * correctly and HW key is indeed supported in target
 	 */
@@ -1701,6 +1696,13 @@ static int qcedev_check_cipher_params(struct qcedev_cipher_op_req *req,
 			goto error;
 		}
 	}
+
+	if (req->data_len < req->byteoffset) {
+		pr_err("%s: req data length %u is less than byteoffset %u\n",
+				__func__, req->data_len, req->byteoffset);
+		goto error;
+	}
+
 	/* Ensure zer ivlen for ECB  mode  */
 	if (req->ivlen > 0) {
 		if ((req->mode == QCEDEV_AES_MODE_ECB) ||
