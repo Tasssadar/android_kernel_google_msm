@@ -77,6 +77,9 @@ struct tzbsp_video_set_state_req {
 
 static inline int venus_hfi_clk_gating_off(struct venus_hfi_device *device);
 
+static unsigned long venus_hfi_get_clock_rate(struct venus_core_clock *clock,
+		int num_mbs_per_sec);
+
 static void venus_hfi_dump_packet(u8 *packet)
 {
 	u32 c = 0, packet_size = *(u32 *)packet;
@@ -846,7 +849,7 @@ fail_clk_enable:
 /*Calling function is responsible to acquire device->clk_pwr_lock*/
 static inline void venus_hfi_clk_disable(struct venus_hfi_device *device)
 {
-	int i;
+	int i, rc = 0;
 	struct venus_core_clock *cl;
 
 	if (!device) {
@@ -857,6 +860,14 @@ static inline void venus_hfi_clk_disable(struct venus_hfi_device *device)
 		dprintk(VIDC_DBG, "Clocks already disabled");
 		return;
 	}
+
+	/* We get better power savings if we lower the venus core clock to the
+	 * lowest level before disabling it. */
+	rc = clk_set_rate(device->resources.clock[VCODEC_CLK].clk,
+			venus_hfi_get_clock_rate(
+			&device->resources.clock[VCODEC_CLK], 0));
+	if (rc)
+		dprintk(VIDC_WARN, "Failed to set clock rate to min: %d\n", rc);
 
 	for (i = 0; i <= device->clk_gating_level; i++) {
 		cl = &device->resources.clock[i];
@@ -1520,6 +1531,7 @@ static int venus_hfi_core_init(void *device)
 	INIT_LIST_HEAD(&dev->sess_head);
 	mutex_init(&dev->read_lock);
 	mutex_init(&dev->write_lock);
+	mutex_init(&dev->session_lock);
 	venus_hfi_set_registers(dev);
 
 	if (!dev->hal_client) {
@@ -1992,7 +2004,10 @@ static void *venus_hfi_session_init(void *device, u32 session_id,
 	else if (session_type == 2)
 		new_session->is_decoder = 1;
 	new_session->device = dev;
+
+	mutex_lock(&dev->session_lock);
 	list_add_tail(&new_session->list, &dev->sess_head);
+	mutex_unlock(&dev->session_lock);
 
 	if (create_pkt_cmd_sys_session_init(&pkt, (u32)new_session,
 			session_type, codec_type)) {
@@ -2062,7 +2077,11 @@ static int venus_hfi_session_clean(void *session)
 	sess_close = session;
 	dprintk(VIDC_DBG, "deleted the session: 0x%p",
 			sess_close);
+	mutex_lock(&((struct venus_hfi_device *)
+			sess_close->device)->session_lock);
 	list_del(&sess_close->list);
+	mutex_unlock(&((struct venus_hfi_device *)
+			sess_close->device)->session_lock);
 	kfree(sess_close);
 	return 0;
 }
@@ -2546,7 +2565,8 @@ static void venus_hfi_response_handler(struct venus_hfi_device *device)
 		while (!venus_hfi_iface_msgq_read(device, packet)) {
 			rc = hfi_process_msg_packet(device->callback,
 				device->device_id,
-				(struct vidc_hal_msg_pkt_hdr *) packet);
+				(struct vidc_hal_msg_pkt_hdr *) packet,
+				&device->sess_head, &device->session_lock);
 			if (rc == HFI_MSG_EVENT_NOTIFY)
 				venus_hfi_process_msg_event_notify(
 					device, (void *)packet);
@@ -2751,6 +2771,8 @@ static inline void venus_hfi_disable_clks(struct venus_hfi_device *device)
 	mutex_lock(&device->clk_pwr_lock);
 	if (device->clocks_enabled) {
 		for (i = VCODEC_CLK; i < VCODEC_MAX_CLKS; i++) {
+			if (i == VCODEC_OCMEM_CLK && !device->res->has_ocmem)
+				continue;
 			cl = &device->resources.clock[i];
 			usleep(100);
 			clk_disable(cl->clk);
