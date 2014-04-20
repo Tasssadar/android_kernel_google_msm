@@ -11,6 +11,7 @@
 #include <linux/bug.h>
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
+#include <linux/uidgid.h>
 
 #define ACL_UNDEFINED_ID	(-1)
 
@@ -36,7 +37,13 @@
 struct posix_acl_entry {
 	short			e_tag;
 	unsigned short		e_perm;
-	unsigned int		e_id;
+	union {
+		kuid_t		e_uid;
+		kgid_t		e_gid;
+#ifndef CONFIG_UIDGID_STRICT_TYPE_CHECKS
+		unsigned int	e_id;
+#endif
+	};
 };
 
 struct posix_acl {
@@ -82,13 +89,16 @@ extern int posix_acl_valid(const struct posix_acl *);
 extern int posix_acl_permission(struct inode *, const struct posix_acl *, int);
 extern struct posix_acl *posix_acl_from_mode(umode_t, gfp_t);
 extern int posix_acl_equiv_mode(const struct posix_acl *, umode_t *);
-extern int posix_acl_create(struct posix_acl **, gfp_t, umode_t *);
-extern int posix_acl_chmod(struct posix_acl **, gfp_t, umode_t);
+extern int __posix_acl_create(struct posix_acl **, gfp_t, umode_t *);
+extern int __posix_acl_chmod(struct posix_acl **, gfp_t, umode_t);
 
 extern struct posix_acl *get_posix_acl(struct inode *, int);
 extern int set_posix_acl(struct inode *, int, struct posix_acl *);
 
 #ifdef CONFIG_FS_POSIX_ACL
+extern int posix_acl_chmod(struct inode *, umode_t);
+extern int posix_acl_create(struct inode *, umode_t *, struct posix_acl **,
+		struct posix_acl **);
 static inline struct posix_acl **acl_by_type(struct inode *inode, int type)
 {
 	switch (type) {
@@ -168,5 +178,7 @@ static inline void cache_no_acl(struct inode *inode)
 	inode->i_default_acl = NULL;
 #endif
 }
+
+struct posix_acl *get_acl(struct inode *inode, int type);
 
 #endif  /* __LINUX_POSIX_ACL_H */
