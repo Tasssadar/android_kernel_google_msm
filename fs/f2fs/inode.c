@@ -12,6 +12,7 @@
 #include <linux/f2fs_fs.h>
 #include <linux/buffer_head.h>
 #include <linux/writeback.h>
+#include <linux/bitops.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -21,20 +22,20 @@
 void f2fs_set_inode_flags(struct inode *inode)
 {
 	unsigned int flags = F2FS_I(inode)->i_flags;
-
-	inode->i_flags &= ~(S_SYNC | S_APPEND | S_IMMUTABLE |
-			S_NOATIME | S_DIRSYNC);
+	unsigned int new_fl = 0;
 
 	if (flags & FS_SYNC_FL)
-		inode->i_flags |= S_SYNC;
+		new_fl |= S_SYNC;
 	if (flags & FS_APPEND_FL)
-		inode->i_flags |= S_APPEND;
+		new_fl |= S_APPEND;
 	if (flags & FS_IMMUTABLE_FL)
-		inode->i_flags |= S_IMMUTABLE;
+		new_fl |= S_IMMUTABLE;
 	if (flags & FS_NOATIME_FL)
-		inode->i_flags |= S_NOATIME;
+		new_fl |= S_NOATIME;
 	if (flags & FS_DIRSYNC_FL)
-		inode->i_flags |= S_DIRSYNC;
+		new_fl |= S_DIRSYNC;
+	set_mask_bits(&inode->i_flags,
+			S_SYNC|S_APPEND|S_IMMUTABLE|S_NOATIME|S_DIRSYNC, new_fl);
 }
 
 static void __get_inode_rdev(struct inode *inode, struct f2fs_inode *ri)
@@ -107,6 +108,7 @@ static int do_read_inode(struct inode *inode)
 	fi->flags = 0;
 	fi->i_advise = ri->i_advise;
 	fi->i_pino = le32_to_cpu(ri->i_pino);
+	fi->i_dir_level = ri->i_dir_level;
 
 	get_extent_info(&fi->ext, ri->i_ext);
 	get_inline_info(fi, ri);
@@ -204,6 +206,7 @@ void update_inode(struct inode *inode, struct page *node_page)
 	ri->i_flags = cpu_to_le32(F2FS_I(inode)->i_flags);
 	ri->i_pino = cpu_to_le32(F2FS_I(inode)->i_pino);
 	ri->i_generation = cpu_to_le32(inode->i_generation);
+	ri->i_dir_level = F2FS_I(inode)->i_dir_level;
 
 	__set_inode_rdev(inode, ri);
 	set_cold_node(inode, node_page);
@@ -271,7 +274,7 @@ void f2fs_evict_inode(struct inode *inode)
 			inode->i_ino == F2FS_META_INO(sbi))
 		goto no_delete;
 
-	f2fs_bug_on(atomic_read(&F2FS_I(inode)->dirty_dents));
+	f2fs_bug_on(get_dirty_dents(inode));
 	remove_dirty_dir_inode(inode);
 
 	if (inode->i_nlink || is_bad_inode(inode))
