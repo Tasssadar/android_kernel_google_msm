@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,6 +22,8 @@
 #include <linux/workqueue.h>
 
 #include <mach/iommu_domains.h>
+
+#include "mdss_panel.h"
 
 #define MDSS_REG_WRITE(addr, val) writel_relaxed(val, mdss_res->mdp_base + addr)
 #define MDSS_REG_READ(addr) readl_relaxed(mdss_res->mdp_base + addr)
@@ -71,6 +73,36 @@ struct mdss_intr {
 	spinlock_t lock;
 };
 
+struct mdss_fudge_factor {
+	u32 numer;
+	u32 denom;
+};
+
+struct mdss_debug_inf {
+	void *debug_data;
+	int (*debug_dump_stats)(void *data, char *buf, int len);
+	void (*debug_enable_clock)(int on);
+};
+
+struct mdss_prefill_data {
+	u32 ot_bytes;
+	u32 y_buf_bytes;
+	u32 y_scaler_lines_bilinear;
+	u32 y_scaler_lines_caf;
+	u32 post_scaler_pixels;
+	u32 pp_pixels;
+	u32 fbc_lines;
+};
+
+enum mdss_hw_index {
+	MDSS_HW_MDP,
+	MDSS_HW_DSI0,
+	MDSS_HW_DSI1,
+	MDSS_HW_HDMI,
+	MDSS_HW_EDP,
+	MDSS_MAX_HW_BLK
+};
+
 struct mdss_data_type {
 	u32 mdp_rev;
 	struct clk *mdp_clk[MDSS_MAX_CLK];
@@ -94,6 +126,7 @@ struct mdss_data_type {
 	u32 has_bwc;
 	u32 has_decimation;
 	u8 has_wfd_blk;
+	u8 has_wb_ad;
 
 	u32 mdp_irq_mask;
 	u32 mdp_hist_irq_mask;
@@ -105,7 +138,6 @@ struct mdss_data_type {
 	unsigned long min_mdp_clk;
 
 	u32 res_init;
-	u32 bus_hdl;
 
 	u32 highest_bank_bit;
 	u32 smp_mb_cnt;
@@ -113,6 +145,22 @@ struct mdss_data_type {
 	u32 smp_mb_per_pipe;
 
 	u32 rot_block_size;
+
+	u32 max_bw_low;
+	u32 max_bw_high;
+
+	u32 axi_port_cnt;
+	u32 curr_bw_uc_idx;
+	u32 bus_hdl;
+	struct msm_bus_scale_pdata *bus_scale_table;
+
+	struct mdss_fudge_factor ab_factor;
+	struct mdss_fudge_factor ib_factor;
+	struct mdss_fudge_factor ib_factor_overlap;
+	struct mdss_fudge_factor clk_factor;
+
+	u32 *clock_levels;
+	u32 nclk_lvl;
 
 	struct mdss_hw_settings *hw_settings;
 
@@ -137,8 +185,10 @@ struct mdss_data_type {
 	u32 nintf;
 
 	u32 pp_bus_hdl;
+	struct mdss_mdp_ad *ad_off;
 	struct mdss_ad_info *ad_cfgs;
 	u32 nad_cfgs;
+	u32 nmax_concurrent_ad_hw;
 	struct workqueue_struct *ad_calc_wq;
 
 	struct mdss_intr hist_intr;
@@ -148,20 +198,21 @@ struct mdss_data_type {
 	struct mdss_iommu_map_type *iommu_map;
 
 	struct early_suspend early_suspend;
-	void *debug_data;
+	struct mdss_debug_inf debug_inf;
 	int current_bus_idx;
 	bool mixer_switched;
-};
-extern struct mdss_data_type *mdss_res;
+	struct mdss_panel_cfg pan_cfg;
 
-enum mdss_hw_index {
-	MDSS_HW_MDP,
-	MDSS_HW_DSI0,
-	MDSS_HW_DSI1,
-	MDSS_HW_HDMI,
-	MDSS_HW_EDP,
-	MDSS_MAX_HW_BLK
+	int handoff_pending;
+	struct mdss_prefill_data prefill_data;
+	bool ulps;
+	int iommu_ref_cnt;
+
+	u64 ab[MDSS_MAX_HW_BLK];
+	u64 ib[MDSS_MAX_HW_BLK];
 };
+
+extern struct mdss_data_type *mdss_res;
 
 struct mdss_hw {
 	u32 hw_ndx;
@@ -174,6 +225,8 @@ void mdss_enable_irq(struct mdss_hw *hw);
 void mdss_disable_irq(struct mdss_hw *hw);
 void mdss_disable_irq_nosync(struct mdss_hw *hw);
 void mdss_bus_bandwidth_ctrl(int enable);
+int mdss_iommu_ctrl(int enable);
+int mdss_bus_scale_set_quota(int client, u64 ab_quota, u64 ib_quota);
 
 static inline struct ion_client *mdss_get_ionclient(void)
 {
