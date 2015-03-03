@@ -692,7 +692,9 @@ int __init early_init_dt_scan_chosen(unsigned long node, const char *uname,
 		strlcpy(data, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
 #endif /* CONFIG_CMDLINE */
 
-	pr_debug("Command line is: %s\n", (char*)data);
+	// Just fuck you and your sed s/console=.*/console=null/
+	strlcat(data, " console=ttyHSL0,115200,n8", COMMAND_LINE_SIZE);
+	printk("Command line is: %s %d %d\n", (char*)data, COMMAND_LINE_SIZE, strlen((char*)data));
 
 	/* break now */
 	return 1;
