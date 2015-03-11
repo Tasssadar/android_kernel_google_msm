@@ -945,26 +945,6 @@ static int pmu_cpu_notify(struct notifier_block *b,
 	return NOTIFY_OK;
 }
 
-static void armpmu_update_counters(void)
-{
-	struct pmu_hw_events *hw_events;
-	int idx;
-
-	if (!cpu_pmu)
-		return;
-
-	hw_events = cpu_pmu->get_hw_events();
-
-	for (idx = 0; idx <= cpu_pmu->num_events; ++idx) {
-		struct perf_event *event = hw_events->events[idx];
-
-		if (!event)
-			continue;
-
-		armpmu_read(event);
-	}
-}
-
 static struct notifier_block __cpuinitdata pmu_cpu_notifier = {
 	.notifier_call = pmu_cpu_notify,
 };
