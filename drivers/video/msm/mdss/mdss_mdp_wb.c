@@ -51,7 +51,8 @@ enum mdss_mdp_wb_node_state {
 	REGISTERED,
 	IN_FREE_QUEUE,
 	IN_BUSY_QUEUE,
-	WITH_CLIENT
+	WITH_CLIENT,
+	WB_BUFFER_READY,
 };
 
 struct mdss_mdp_wb_data {
@@ -60,10 +61,13 @@ struct mdss_mdp_wb_data {
 	struct msmfb_data buf_info;
 	struct mdss_mdp_data buf_data;
 	int state;
+	bool user_alloc;
 };
 
 static DEFINE_MUTEX(mdss_mdp_wb_buf_lock);
 static struct mdss_mdp_wb mdss_mdp_wb_info;
+
+static void mdss_mdp_wb_free_node(struct mdss_mdp_wb_data *node);
 
 #ifdef DEBUG_WRITEBACK
 /* for debugging: writeback output buffer to allocated memory */
@@ -131,6 +135,16 @@ int mdss_mdp_wb_set_secure(struct msm_fb_data_type *mfd, int enable)
 	struct mdss_mdp_mixer *mixer;
 
 	pr_debug("setting secure=%d\n", enable);
+
+	if (!ctl || !ctl->mdata) {
+		pr_err("%s : ctl is NULL", __func__);
+		return -EINVAL;
+	}
+
+	if (!wb) {
+		pr_err("unable to start, writeback is not initialized\n");
+		return -ENODEV;
+	}
 
 	ctl->is_secure = enable;
 	wb->is_secure = enable;
@@ -242,6 +256,7 @@ static int mdss_mdp_wb_terminate(struct msm_fb_data_type *mfd)
 		struct mdss_mdp_wb_data *node, *temp;
 		list_for_each_entry_safe(node, temp, &wb->register_queue,
 					 registered_entry) {
+			mdss_mdp_wb_free_node(node);
 			list_del(&node->registered_entry);
 			kfree(node);
 		}
@@ -352,11 +367,33 @@ static struct mdss_mdp_wb_data *get_local_node(struct mdss_mdp_wb *wb,
 static struct mdss_mdp_wb_data *get_user_node(struct msm_fb_data_type *mfd,
 						struct msmfb_data *data)
 {
-
 	struct mdss_mdp_wb *wb = mfd_to_wb(mfd);
 	struct mdss_mdp_wb_data *node;
 	struct mdss_mdp_img_data *buf;
 	int ret;
+
+	if (!list_empty(&wb->register_queue)) {
+		struct ion_client *iclient = mdss_get_ionclient();
+		struct ion_handle *ihdl;
+
+		ihdl = ion_import_dma_buf(iclient, data->memory_id);
+		if (IS_ERR_OR_NULL(ihdl)) {
+			pr_err("unable to import fd %d\n", data->memory_id);
+			return NULL;
+		}
+		/* only interested in ptr address, so we can free handle */
+		ion_free(iclient, ihdl);
+
+		list_for_each_entry(node, &wb->register_queue, registered_entry)
+			if ((node->buf_data.p[0].srcp_ihdl == ihdl) &&
+				    (node->buf_info.offset == data->offset)) {
+				pr_debug("found fd=%d ihdl=%p off=%x addr=%x\n",
+						data->memory_id, ihdl,
+						data->offset,
+						node->buf_data.p[0].addr);
+				return node;
+			}
+	}
 
 	node = kzalloc(sizeof(struct mdss_mdp_wb_data), GFP_KERNEL);
 	if (node == NULL) {
@@ -364,6 +401,7 @@ static struct mdss_mdp_wb_data *get_user_node(struct msm_fb_data_type *mfd,
 		return NULL;
 	}
 
+	node->user_alloc = true;
 	node->buf_data.num_planes = 1;
 	buf = &node->buf_data.p[0];
 	if (wb->is_secure)
@@ -391,6 +429,23 @@ register_fail:
 	return NULL;
 }
 
+static void mdss_mdp_wb_free_node(struct mdss_mdp_wb_data *node)
+{
+	struct mdss_mdp_img_data *buf;
+
+	if (node->user_alloc) {
+		buf = &node->buf_data.p[0];
+		pr_debug("free user mem_id=%d ihdl=%p, offset=%u addr=0x%x\n",
+				node->buf_info.memory_id,
+				buf->srcp_ihdl,
+				node->buf_info.offset,
+				buf->addr);
+
+		mdss_mdp_put_img(&node->buf_data.p[0]);
+		node->user_alloc = false;
+	}
+}
+
 static int mdss_mdp_wb_queue(struct msm_fb_data_type *mfd,
 				struct msmfb_data *data, int local)
 {
@@ -411,13 +466,37 @@ static int mdss_mdp_wb_queue(struct msm_fb_data_type *mfd,
 	if (node == NULL)
 		node = get_user_node(mfd, data);
 
-	if (!node || node->state == IN_BUSY_QUEUE ||
-	    node->state == IN_FREE_QUEUE) {
-		pr_err("memory not registered or Buffer already with us\n");
-		ret = -EINVAL;
+	if (!node) {
+		pr_err("memory not registered\n");
+		ret = -ENOENT;
 	} else {
-		list_add_tail(&node->active_entry, &wb->free_queue);
-		node->state = IN_FREE_QUEUE;
+		struct mdss_mdp_img_data *buf = &node->buf_data.p[0];
+
+		switch (node->state) {
+		case IN_FREE_QUEUE:
+			pr_err("node 0x%x was already queued before\n",
+					buf->addr);
+			ret = -EINVAL;
+			break;
+		case IN_BUSY_QUEUE:
+			pr_err("node 0x%x still in busy state\n", buf->addr);
+			ret = -EBUSY;
+			break;
+		case WB_BUFFER_READY:
+			pr_debug("node 0x%x re-queued without dequeue\n",
+				buf->addr);
+			list_del(&node->active_entry);
+		case WITH_CLIENT:
+		case REGISTERED:
+			list_add_tail(&node->active_entry, &wb->free_queue);
+			node->state = IN_FREE_QUEUE;
+			break;
+		default:
+			pr_err("Invalid node 0x%x state %d\n",
+				buf->addr, node->state);
+			ret = -EINVAL;
+			break;
+		}
 	}
 	mutex_unlock(&wb->lock);
 
@@ -543,6 +622,7 @@ int mdss_mdp_wb_kickoff(struct msm_fb_data_type *mfd)
 	if (wb && node) {
 		mutex_lock(&wb->lock);
 		list_add_tail(&node->active_entry, &wb->busy_queue);
+		node->state = WB_BUFFER_READY;
 		mutex_unlock(&wb->lock);
 		wake_up(&wb->wait_q);
 	}

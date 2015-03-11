@@ -30,6 +30,8 @@
 #include <linux/qpnp/qpnp-adc.h>
 #include <linux/debugfs.h>
 #include <linux/suspend.h>
+#include <linux/reboot.h>
+#include <linux/syscalls.h>
 
 #define MODE_REG      0x06
 #define VCELL_REG     0x02
@@ -79,18 +81,21 @@ struct max17048_chip {
 	int batt_tech;
 	int fcc_mah;
 	int voltage;
-	int lasttime_voltage;
 	int lasttime_capacity_level;
 	int chg_state;
 	int batt_temp;
 	int batt_health;
 	int batt_current;
+	int uvlo_thr_mv;
+	int poll_interval_ms;
 };
 
 static struct max17048_chip *ref;
+struct completion monitor_work_done;
 static int max17048_get_prop_current(struct max17048_chip *chip);
 static int max17048_get_prop_temp(struct max17048_chip *chip);
 static int max17048_clear_interrupt(struct max17048_chip *chip);
+static int max17048_get_prop_status(struct max17048_chip *chip);
 
 struct debug_reg {
 	char  *name;
@@ -245,15 +250,24 @@ static int max17048_get_vcell(struct max17048_chip *chip)
 	return 0;
 }
 
-static void max17048_check_recharge(struct max17048_chip *chip)
+static int max17048_check_recharge(struct max17048_chip *chip)
 {
 	union power_supply_propval ret = {true,};
+	int chg_status;
 
-	if (chip->capacity_level == 99 &&
-			chip->lasttime_capacity_level == 100)
+	if (chip->batt_health != POWER_SUPPLY_HEALTH_GOOD)
+		return false;
+
+	chg_status = max17048_get_prop_status(chip);
+	if (chip->capacity_level <= 99 &&
+			chg_status == POWER_SUPPLY_STATUS_NOT_CHARGING) {
 		chip->ac_psy->set_property(chip->ac_psy,
 				POWER_SUPPLY_PROP_CHARGING_ENABLED,
 				&ret);
+		return true;
+	}
+
+	return false;
 }
 
 static int max17048_get_soc(struct max17048_chip *chip)
@@ -297,7 +311,7 @@ static int max17048_set_rcomp(struct max17048_chip *chip)
 	rcomp = chip->rcomp * 1000 - (temp-20) * scale_coeff;
 	rcomp = bound_check(255, 0, rcomp / 1000);
 
-	pr_info("%s: new RCOMP = 0x%02X\n", __func__, rcomp);
+	pr_debug("%s: new RCOMP = 0x%02X\n", __func__, rcomp);
 
 	rcomp = rcomp << CFG_RCOMP_SHIFT;
 
@@ -309,11 +323,40 @@ static int max17048_set_rcomp(struct max17048_chip *chip)
 	return ret;
 }
 
+#define UVLO_COUNT 3
+#define UVLO_FAST_POLL_MS 1000
+#define UVLO_NORMAL_POLL_MS 10000
+#define UVLO_INIT_POLL_MS 25000
+static void max17048_check_low_vbatt(struct max17048_chip *chip)
+{
+	static int uvlo_cnt = 0;
+
+	if (system_state == SYSTEM_BOOTING) {
+		chip->poll_interval_ms = UVLO_INIT_POLL_MS;
+		return;
+	}
+
+	if (chip->voltage < chip->uvlo_thr_mv) {
+		chip->poll_interval_ms = UVLO_FAST_POLL_MS;
+		uvlo_cnt ++;
+	} else {
+		chip->poll_interval_ms = UVLO_NORMAL_POLL_MS;
+		uvlo_cnt = 0;
+	}
+
+	if (uvlo_cnt >= UVLO_COUNT) {
+		pr_info("%s: power down by very low battery\n", __func__);
+		sys_sync();
+		kernel_power_off();
+	}
+}
+
 static void max17048_work(struct work_struct *work)
 {
 	struct max17048_chip *chip =
 		container_of(work, struct max17048_chip, monitor_work.work);
 	int ret = 0;
+	int rechg_now;
 
 	wake_lock(&chip->alert_lock);
 
@@ -328,28 +371,32 @@ static void max17048_work(struct work_struct *work)
 
 	max17048_get_vcell(chip);
 	max17048_get_soc(chip);
+	complete_all(&monitor_work_done);
 
-	if (chip->voltage != chip->lasttime_voltage ||
-		chip->capacity_level != chip->lasttime_capacity_level) {
-		chip->lasttime_voltage = chip->voltage;
-		max17048_check_recharge(chip);
+	if (chip->capacity_level != chip->lasttime_capacity_level ||
+			chip->capacity_level == 0) {
+		rechg_now = max17048_check_recharge(chip);
 		chip->lasttime_capacity_level = chip->capacity_level;
-
-		power_supply_changed(&chip->batt_psy);
+		if (!rechg_now)
+			power_supply_changed(&chip->batt_psy);
 	}
 
 	ret = max17048_clear_interrupt(chip);
 	if (ret < 0)
 		pr_err("%s : error clear alert irq register.\n", __func__);
 
-	pr_info("%s: raw soc = 0x%04X raw vcell = 0x%04X\n",
-			__func__, chip->soc, chip->vcell);
-	pr_info("%s: SOC = %d vbatt_mv = %d\n",
-			__func__, chip->capacity_level, chip->voltage);
-	pr_info("%s: ibatt_ua = %d batt_temp = %d\n",
-			__func__, chip->batt_current, chip->batt_temp);
-
-	wake_unlock(&chip->alert_lock);
+	if (chip->capacity_level == 0) {
+		max17048_check_low_vbatt(chip);
+		schedule_delayed_work(&chip->monitor_work,
+				msecs_to_jiffies(chip->poll_interval_ms));
+	} else {
+		pr_info("%s: rsoc=0x%04X rvcell=0x%04X soc=%d"\
+			" v_mv=%d i_ua=%d t=%d\n", __func__,
+				chip->soc, chip->vcell,
+				chip->capacity_level, chip->voltage,
+				chip->batt_current, chip->batt_temp);
+		wake_unlock(&chip->alert_lock);
+	}
 }
 
 static irqreturn_t max17048_interrupt_handler(int irq, void *data)
@@ -525,12 +572,19 @@ static int max17048_parse_dt(struct device *dev,
 		goto out;
 	}
 
+	ret = of_property_read_u32(dev_node, "max17048,uvlo-thr-mv",
+				   &chip->uvlo_thr_mv);
+	if (ret) {
+		pr_err("%s: failed to read uvlo threshold\n", __func__);
+		goto out;
+	}
+
 	pr_info("%s: rcomp = %d rcomp_co_hot = %d rcomp_co_cold = %d",
 			__func__, chip->rcomp, chip->rcomp_co_hot,
 			chip->rcomp_co_cold);
-	pr_info("%s: alert_thres = %d full_soc = %d empty_soc = %d",
+	pr_info("%s: alert_thres = %d full_soc = %d empty_soc = %d uvlo=%d\n",
 			__func__, chip->alert_threshold,
-			chip->full_soc, chip->empty_soc);
+			chip->full_soc, chip->empty_soc, chip->uvlo_thr_mv);
 
 out:
 	return ret;
@@ -650,6 +704,21 @@ static int max17048_get_prop_current(struct max17048_chip *chip)
 	return chip->batt_current;
 }
 
+static int max17048_get_prop_capacity(struct max17048_chip *chip)
+{
+	int ret;
+
+	if (chip->capacity_level == -EINVAL)
+		return -EINVAL;
+
+	ret = wait_for_completion_timeout(&monitor_work_done,
+					msecs_to_jiffies(500));
+	if (!ret)
+		pr_err("%s: timeout monitor work done\n", __func__);
+
+	return chip->capacity_level;
+}
+
 static enum power_supply_property max17048_battery_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_HEALTH,
@@ -697,7 +766,7 @@ static int max17048_get_property(struct power_supply *psy,
 		val->intval = max17048_get_prop_temp(chip);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
-		val->intval = chip->capacity_level;
+		val->intval = max17048_get_prop_capacity(chip);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		val->intval = max17048_get_prop_current(chip);
@@ -796,6 +865,7 @@ static int max17048_pm_notifier(struct notifier_block *notifier,
 		cancel_delayed_work_sync(&chip->monitor_work);
 		break;
 	case PM_POST_SUSPEND:
+		INIT_COMPLETION(monitor_work_done);
 		schedule_delayed_work(&chip->monitor_work,
 					msecs_to_jiffies(200));
 		max17048_set_alsc_alert(chip, true);
@@ -856,6 +926,8 @@ static int max17048_probe(struct i2c_client *client,
 		goto error;
 	}
 
+	init_completion(&monitor_work_done);
+	chip->capacity_level = -EINVAL;
 	ref = chip;
 	chip->batt_psy.name = "battery";
 	chip->batt_psy.type = POWER_SUPPLY_TYPE_BATTERY;

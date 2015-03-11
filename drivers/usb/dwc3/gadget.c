@@ -2005,6 +2005,13 @@ static int dwc3_cleanup_done_reqs(struct dwc3 *dwc, struct dwc3_ep *dep,
 		 */
 		req->request.actual += req->request.length - count;
 		dwc3_gadget_giveback(dep, req, status);
+
+		/* EP possibly disabled during giveback? */
+		if (!(dep->flags & DWC3_EP_ENABLED)) {
+			dev_dbg(dwc->dev, "%s disabled while handling ep event\n",
+					dep->name);
+			return 0;
+		}
 		if (s_pkt)
 			break;
 		if ((event->status & DEPEVT_STATUS_LST) &&
@@ -2773,8 +2780,24 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 
 	dev_set_name(&dwc->gadget.dev, "gadget");
 
+	switch (dwc->maximum_speed) {
+		case DWC3_DCFG_SUPERSPEED:
+			dwc->gadget.max_speed = USB_SPEED_SUPER;
+			break;
+		case DWC3_DCFG_HIGHSPEED:
+			dwc->gadget.max_speed = USB_SPEED_HIGH;
+			break;
+		case DWC3_DCFG_FULLSPEED1:
+			dwc->gadget.max_speed = USB_SPEED_FULL;
+			break;
+		case DWC3_DCFG_LOWSPEED:
+			dwc->gadget.max_speed = USB_SPEED_LOW;
+			break;
+		default:
+			dwc->gadget.max_speed = USB_SPEED_SUPER;
+			break;
+	}
 	dwc->gadget.ops			= &dwc3_gadget_ops;
-	dwc->gadget.max_speed		= USB_SPEED_SUPER;
 	dwc->gadget.speed		= USB_SPEED_UNKNOWN;
 	dwc->gadget.dev.parent		= dwc->dev;
 	dwc->gadget.sg_supported	= true;

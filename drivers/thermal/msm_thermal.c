@@ -14,9 +14,11 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/kthread.h>
 #include <linux/mutex.h>
 #include <linux/msm_tsens.h>
 #include <linux/workqueue.h>
+#include <linux/completion.h>
 #include <linux/cpu.h>
 #include <linux/reboot.h>
 #include <linux/cpufreq.h>
@@ -385,8 +387,6 @@ static ssize_t store_allowed_mid_high(struct kobject *a, struct attribute *b,
     if (ret != 1)
         return -EINVAL;
 
-    msm_thermal_info.allowed_mid_high = input;
-
     return count;
 }
 
@@ -508,7 +508,6 @@ static struct attribute_group msm_thermal_attr_group = {
 };
 
 /********* STATS START *********/
-
 static ssize_t show_throttle_times(struct kobject *a, struct attribute *b,
                                  char *buf)
 {
@@ -554,7 +553,6 @@ static struct attribute *msm_thermal_stats_attributes[] = {
     &throttle_times.attr,
     NULL
 };
-
 
 static struct attribute_group msm_thermal_stats_attr_group = {
     .attrs = msm_thermal_stats_attributes,

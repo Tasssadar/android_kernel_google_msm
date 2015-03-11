@@ -148,11 +148,12 @@ struct kgsl_mmu_ops {
 	void (*mmu_pagefault_resume)
 			(struct kgsl_mmu *mmu);
 	void (*mmu_disable_clk_on_ts)
-		(struct kgsl_mmu *mmu, uint32_t ts, bool ts_valid);
-	int (*mmu_enable_clk)
-		(struct kgsl_mmu *mmu, int ctx_id);
+		(struct kgsl_mmu *mmu,
+		uint32_t ts, int unit);
+	void (*mmu_enable_clk)
+		(struct kgsl_mmu *mmu, int unit);
 	void (*mmu_disable_clk)
-		(struct kgsl_mmu *mmu);
+		(struct kgsl_mmu *mmu, int unit);
 	phys_addr_t (*mmu_get_default_ttbr0)(struct kgsl_mmu *mmu,
 				unsigned int unit_id,
 				enum kgsl_iommu_context_id ctx_id);
@@ -177,6 +178,8 @@ struct kgsl_mmu_ops {
 	unsigned int (*mmu_sync_unlock)
 			(struct kgsl_mmu *mmu, unsigned int *cmds);
 	int (*mmu_hw_halt_supported)(struct kgsl_mmu *mmu, int iommu_unit_num);
+	int (*mmu_set_pf_policy)(struct kgsl_mmu *mmu, unsigned int pf_policy);
+	void (*mmu_set_pagefault)(struct kgsl_mmu *mmu);
 };
 
 struct kgsl_mmu_pt_ops {
@@ -321,26 +324,25 @@ static inline phys_addr_t kgsl_mmu_get_default_ttbr0(struct kgsl_mmu *mmu,
 		return 0;
 }
 
-static inline int kgsl_mmu_enable_clk(struct kgsl_mmu *mmu,
-					int ctx_id)
+static inline void kgsl_mmu_enable_clk(struct kgsl_mmu *mmu, int unit)
 {
 	if (mmu->mmu_ops && mmu->mmu_ops->mmu_enable_clk)
-		return mmu->mmu_ops->mmu_enable_clk(mmu, ctx_id);
+		mmu->mmu_ops->mmu_enable_clk(mmu, unit);
 	else
-		return 0;
+		return;
 }
 
-static inline void kgsl_mmu_disable_clk(struct kgsl_mmu *mmu)
+static inline void kgsl_mmu_disable_clk(struct kgsl_mmu *mmu, int unit)
 {
 	if (mmu->mmu_ops && mmu->mmu_ops->mmu_disable_clk)
-		mmu->mmu_ops->mmu_disable_clk(mmu);
+		mmu->mmu_ops->mmu_disable_clk(mmu, unit);
 }
 
 static inline void kgsl_mmu_disable_clk_on_ts(struct kgsl_mmu *mmu,
-						unsigned int ts, bool ts_valid)
+						unsigned int ts, int unit)
 {
 	if (mmu->mmu_ops && mmu->mmu_ops->mmu_disable_clk_on_ts)
-		mmu->mmu_ops->mmu_disable_clk_on_ts(mmu, ts, ts_valid);
+		mmu->mmu_ops->mmu_disable_clk_on_ts(mmu, ts, unit);
 }
 
 static inline unsigned int kgsl_mmu_get_int_mask(void)
@@ -479,6 +481,21 @@ static inline int kgsl_mmu_sync_unlock(struct kgsl_mmu *mmu,
 		return mmu->mmu_ops->mmu_sync_unlock(mmu, cmds);
 	else
 		return 0;
+}
+
+static inline int kgsl_mmu_set_pagefault_policy(struct kgsl_mmu *mmu,
+						unsigned int pf_policy)
+{
+	if (mmu->mmu_ops && mmu->mmu_ops->mmu_set_pf_policy)
+		return mmu->mmu_ops->mmu_set_pf_policy(mmu, pf_policy);
+	else
+		return 0;
+}
+
+static inline void kgsl_mmu_set_pagefault(struct kgsl_mmu *mmu)
+{
+	if (mmu->mmu_ops && mmu->mmu_ops->mmu_set_pagefault)
+		return mmu->mmu_ops->mmu_set_pagefault(mmu);
 }
 
 #endif /* __KGSL_MMU_H */

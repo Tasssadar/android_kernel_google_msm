@@ -260,8 +260,8 @@ static unsigned long msm_cpp_queue_buffer_info(struct cpp_device *cpp_dev,
 QUEUE_BUFF_ERROR2:
 	ion_unmap_iommu(cpp_dev->client, buff->map_info.ion_handle,
 		cpp_dev->domain_num, 0);
-QUEUE_BUFF_ERROR1:
 	ion_free(cpp_dev->client, buff->map_info.ion_handle);
+QUEUE_BUFF_ERROR1:
 	buff->map_info.ion_handle = NULL;
 	kzfree(buff);
 
@@ -784,7 +784,7 @@ static void cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 
 		/*Start firmware loading*/
 		msm_cpp_write(MSM_CPP_CMD_FW_LOAD, cpp_dev->base);
-		msm_cpp_write(MSM_CPP_END_ADDRESS, cpp_dev->base);
+		msm_cpp_write(fw->size, cpp_dev->base);
 		msm_cpp_write(MSM_CPP_START_ADDRESS, cpp_dev->base);
 
 		if (ptr_bin) {
@@ -1457,6 +1457,7 @@ long msm_cpp_subdev_ioctl(struct v4l2_subdev *sd,
 	case VIDIOC_MSM_CPP_FLUSH_QUEUE:
 		rc = msm_cpp_flush_frames(cpp_dev);
 		break;
+	case VIDIOC_MSM_CPP_APPEND_STREAM_BUFF_INFO:
 	case VIDIOC_MSM_CPP_ENQUEUE_STREAM_BUFF_INFO: {
 		struct msm_cpp_stream_buff_info_t *u_stream_buff_info;
 		struct msm_cpp_stream_buff_info_t k_stream_buff_info;
@@ -1514,9 +1515,11 @@ long msm_cpp_subdev_ioctl(struct v4l2_subdev *sd,
 			return -EINVAL;
 		}
 
-		rc = msm_cpp_add_buff_queue_entry(cpp_dev,
-			((k_stream_buff_info.identity >> 16) & 0xFFFF),
-			(k_stream_buff_info.identity & 0xFFFF));
+		if (cmd != VIDIOC_MSM_CPP_APPEND_STREAM_BUFF_INFO) {
+			rc = msm_cpp_add_buff_queue_entry(cpp_dev,
+				((k_stream_buff_info.identity >> 16) & 0xFFFF),
+				(k_stream_buff_info.identity & 0xFFFF));
+		}
 		if (!rc)
 			rc = msm_cpp_enqueue_buff_info_list(cpp_dev,
 				&k_stream_buff_info);
@@ -1723,6 +1726,9 @@ static long msm_cpp_subdev_do_ioctl(
 		struct cpp_device *cpp_dev = v4l2_get_subdevdata(sd);
 		struct msm_camera_v4l2_ioctl_t *ioctl_ptr = arg;
 		struct msm_cpp_frame_info_t inst_info;
+
+		memset(&inst_info, 0, sizeof(inst_info));
+
 		for (i = 0; i < MAX_ACTIVE_CPP_INSTANCE; i++) {
 			if (cpp_dev->cpp_subscribe_list[i].vfh == vfh) {
 				inst_info.inst_id = i;

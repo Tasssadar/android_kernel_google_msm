@@ -20,7 +20,6 @@ int msm_vidc_debug_out = VIDC_OUT_PRINTK;
 int msm_fw_debug = 0x18;
 int msm_fw_debug_mode = 0x1;
 int msm_fw_low_power_mode = 0x1;
-int msm_vp8_low_tier = 0x1;
 
 struct debug_buffer {
 	char ptr[MAX_DBG_BUF_SIZE];
@@ -171,11 +170,6 @@ struct dentry *msm_vidc_debugfs_init_core(struct msm_vidc_core *core,
 		dprintk(VIDC_DBG, "debugfs_create_file: fail\n");
 		goto failed_create_dir;
 	}
-	if (!debugfs_create_u32("vp8_low_tier", S_IRUGO | S_IWUSR,
-			parent, &msm_vp8_low_tier)) {
-		dprintk(VIDC_DBG, "debugfs_create_file: fail\n");
-		goto failed_create_dir;
-	}
 	if (!debugfs_create_u32("debug_output", S_IRUGO | S_IWUSR,
 			parent, &msm_vidc_debug_out)) {
 		dprintk(VIDC_ERR, "debugfs_create_file: fail\n");
@@ -244,6 +238,7 @@ static ssize_t inst_info_read(struct file *file, char __user *buf,
 	write_str(&dbg_buf, "width: %d\n", inst->prop.width);
 	write_str(&dbg_buf, "fps: %d\n", inst->prop.fps);
 	write_str(&dbg_buf, "state: %d\n", inst->state);
+	write_str(&dbg_buf, "secure: %d\n", !!(inst->flags & VIDC_SECURE));
 	write_str(&dbg_buf, "-----------Formats-------------\n");
 	for (i = 0; i < MAX_PORT_NUM; i++) {
 		write_str(&dbg_buf, "capability: %s\n", i == OUTPUT_PORT ?

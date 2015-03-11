@@ -102,6 +102,17 @@ static int __mdss_mdp_pipe_smp_mmb_is_empty(unsigned long *smp)
 	return bitmap_weight(smp, SMP_MB_CNT) == 0;
 }
 
+u32 mdss_mdp_smp_get_size(struct mdss_mdp_pipe *pipe)
+{
+	int i, mb_cnt = 0;
+
+	for (i = 0; i < MAX_PLANES; i++) {
+		mb_cnt += bitmap_weight(pipe->smp_map[i].allocated, SMP_MB_CNT);
+	}
+
+	return mb_cnt * SMP_MB_SIZE;
+}
+
 static void mdss_mdp_smp_set_wm_levels(struct mdss_mdp_pipe *pipe, int mb_cnt)
 {
 	u32 fetch_size, val, wm[3];
@@ -291,7 +302,7 @@ int mdss_mdp_pipe_map(struct mdss_mdp_pipe *pipe)
 static struct mdss_mdp_pipe *mdss_mdp_pipe_init(struct mdss_mdp_mixer *mixer,
 						u32 type, u32 off)
 {
-	struct mdss_mdp_pipe *pipe;
+	struct mdss_mdp_pipe *pipe = NULL;
 	struct mdss_data_type *mdata;
 	struct mdss_mdp_pipe *pipe_pool = NULL;
 	u32 npipes;

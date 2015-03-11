@@ -154,6 +154,7 @@ struct msm_vfe_axi_stream_release_cmd {
 enum msm_vfe_axi_stream_cmd {
 	STOP_STREAM,
 	START_STREAM,
+	STOP_IMMEDIATELY,
 };
 
 struct msm_vfe_axi_stream_cfg_cmd {
@@ -297,7 +298,8 @@ enum msm_isp_event_idx {
 	ISP_CAMIF_ERROR     = 6,
 	ISP_SOF             = 7,
 	ISP_EOF             = 8,
-	ISP_EVENT_MAX       = 9
+	ISP_FRAME_DROP      = 9,
+	ISP_EVENT_MAX       = 10
 };
 
 #define ISP_EVENT_OFFSET          8
@@ -313,6 +315,7 @@ enum msm_isp_event_idx {
 #define ISP_EVENT_CAMIF_ERROR     (ISP_EVENT_BASE + ISP_CAMIF_ERROR)
 #define ISP_EVENT_SOF             (ISP_EVENT_BASE + ISP_SOF)
 #define ISP_EVENT_EOF             (ISP_EVENT_BASE + ISP_EOF)
+#define ISP_EVENT_FRAME_DROP      (ISP_EVENT_BASE + ISP_FRAME_DROP)
 #define ISP_EVENT_BUF_DIVERT      (ISP_BUF_EVENT_BASE)
 #define ISP_EVENT_STATS_NOTIFY    (ISP_STATS_EVENT_BASE)
 #define ISP_EVENT_COMP_STATS_NOTIFY (ISP_EVENT_STATS_NOTIFY + MSM_ISP_STATS_MAX)
