@@ -329,6 +329,14 @@ static int kcal_ctrl_probe(struct platform_device *pdev)
 	if (ret)
 		pr_err("%s: unable to create sysfs entries\n", __func__);
 
+	// Colder ~7500K calibration as per
+	// http://forum.xda-developers.com/showpost.php?p=57265483&postcount=620
+	lut_data->red = 237;
+	lut_data->green = 235;
+	lut_data->blue = 255;
+	pr_info("kcal: setting default values to %d %d %d\n", lut_data->red, lut_data->green, lut_data->blue);
+	kcal_apply_values(lut_data);
+
 	return ret;
 }
 
